@@ -39,6 +39,7 @@ L(`- AbuseIPDB: ${f.abuseipdb ? j(f.abuseipdb) : 'sem dado'}`);
 L(`- Shodan InternetDB: ${f.internetdb ? j(f.internetdb) : 'sem dado'}`);
 L(`- Registro do domínio (RDAP): ${f.registro ? j(f.registro) : 'sem dado'}`);
 L(`- DNS de e-mail e DNSSEC: ${f.dnsEmail ? j(f.dnsEmail) : 'sem dado'}`);
+L(`- urlscan.io (navegador real; tags do histórico vêm de quem enviou e erram muito): ${f.urlscan ? j(f.urlscan) : 'sem dado'}`);
 L(`- Mozilla Observatory: ${f.observatory ? j(f.observatory) : 'não consultado'}`);
 L(`- Fontes que falharam: ${intel.falharam.join('; ') || 'nenhuma'}`);
 L();

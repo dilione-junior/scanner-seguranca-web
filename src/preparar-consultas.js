@@ -30,5 +30,9 @@ return [{
     vtEntidade: ehIP ? `ip_addresses/${encodeURIComponent(host)}` : `domains/${encodeURIComponent(dominio)}`,
     rdap: ehIP ? `ip/${encodeURIComponent(host)}` : `domain/${encodeURIComponent(dominio)}`,
     observatorio: Boolean(pagina.visitado) && !ehIP,
+    // urlscan.io: análise nova só no modo completo (o navegador do urlscan abre o site).
+    // Nunca "public": só "private" (padrão) ou "unlisted".
+    urlscanAnalisar: Boolean(pagina.visitado),
+    urlscanVisibilidade: config.urlscanVisibilidade === 'unlisted' ? 'unlisted' : 'private',
   },
 }];

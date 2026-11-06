@@ -220,6 +220,7 @@ const limpoBase = {
   'DNS (SPF)': ok({ Answer: [{ type: 16, data: 'v=spf1 -all' }] }),
   'DNS (DMARC)': ok({ Answer: [{ type: 16, data: 'v=DMARC1; p=reject' }] }),
   'Mozilla Observatory': ok({ grade: 'A', score: 90, tests_failed: 1, tests_quantity: 10 }),
+  'urlscan (busca)': ok({ total: 0, results: [] }),
 };
 const consolidar = (respostas = {}, cabecalhos = completo, urlFinal = 'https://exemplo.com.br/', extra = {}) => {
   const prep = preparar(pagina(cabecalhos, urlFinal, extra));
@@ -275,6 +276,62 @@ teste('sem SPF e DMARC gera sinais', () => {
   assert.ok(r.sinais.some((s) => /SPF/.test(s.texto)) && r.sinais.some((s) => /DMARC/.test(s.texto)));
 });
 
+// ---------------------------------------------------------------- urlscan.io
+console.log('urlscan.io');
+const resultadoUrlscan = ({ malicioso = false, marcas = [], data = new Date().toISOString(), visibilidade = 'private', dominio = 'exemplo.com.br', dominios = ['exemplo.com.br', 'cdn.exemplo.net'] } = {}) => ok({
+  task: { uuid: '01a1b170-a56a-779c-80a2-f8a33c16c80c', time: data, visibility: visibilidade, url: 'https://exemplo.com.br/' },
+  page: { url: 'https://exemplo.com.br/', domain: dominio, ip: '8.8.8.8', country: 'BR', title: 'Entrar', tlsIssuer: 'R3', tlsAgeDays: 3 },
+  verdicts: { overall: { malicious: malicioso, score: malicioso ? 100 : 0, brands: marcas, categories: malicioso ? ['phishing'] : [] } },
+  lists: { domains: dominios, ips: ['8.8.8.8'], countries: ['BR'] },
+});
+const enviado = ok({ uuid: '01a1b170-a56a-779c-80a2-f8a33c16c80c', message: 'Submission successful' });
+teste('visibilidade do urlscan nunca é pública', () => {
+  for (const v of ['public', 'PUBLIC', '', undefined, 'unlisted', 'private']) {
+    const r = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa', urlscanVisibilidade: v } });
+    assert.ok(['private', 'unlisted'].includes(r.urlscanVisibilidade), `${v} -> ${r.urlscanVisibilidade}`);
+  }
+});
+teste('análise só é pedida no modo completo', () => {
+  assert.strictEqual(preparar(pagina({})).urlscanAnalisar, true);
+  assert.strictEqual(preparar(pagina({}, undefined, { visitado: false })).urlscanAnalisar, false);
+});
+teste('análise própria limpa: continua limpo e entra nas fontes', () => {
+  const r = consolidar({ 'urlscan (enviar análise)': enviado, 'urlscan (resultado)': resultadoUrlscan() }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'limpo');
+  assert.ok(r.consultadas.includes('urlscan.io'));
+  assert.strictEqual(r.fontes.urlscan.analise.propria, true);
+});
+teste('urlscan malicioso imitando marca: malicioso + marca imitada', () => {
+  const r = consolidar({ 'urlscan (enviar análise)': enviado, 'urlscan (resultado)': resultadoUrlscan({ malicioso: true, marcas: [{ name: 'Itaú', key: 'itau' }] }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+  assert.ok(r.sinais.some((s) => /imitar a marca Itaú/.test(s.texto)));
+});
+teste('marca do próprio domínio não conta como imitação', () => {
+  const r = consolidar({ 'urlscan (enviar análise)': enviado, 'urlscan (resultado)': resultadoUrlscan({ marcas: ['Exemplo'] }) }).inteligencia;
+  assert.ok(!r.sinais.some((s) => /imitar/.test(s.texto)));
+});
+teste('só reputação: análise anterior antiga e maliciosa pesa pouco', () => {
+  const antiga = new Date(Date.now() - 100 * 86400000).toISOString();
+  const r = consolidar({ 'urlscan (última análise)': resultadoUrlscan({ malicioso: true, data: antiga, visibilidade: 'public' }) }, {}, 'https://exemplo.com.br/', { visitado: false }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'suspeito');
+  assert.strictEqual(r.fontes.urlscan.analise.propria, false);
+});
+teste('tag "phishing" no histórico sozinha não condena', () => {
+  const r = consolidar({ 'urlscan (busca)': ok({ total: 3, results: [{ task: { time: '2026-11-06T14:10:00Z', tags: ['phishing', 'possiblethreat'] }, page: { url: 'https://exemplo.com.br/' } }] }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'limpo');
+  assert.deepStrictEqual(r.fontes.urlscan.historico.tags, ['phishing', 'possiblethreat']);
+});
+teste('envio recusado pelo urlscan é explicado e usa a análise anterior', () => {
+  const r = consolidar({ 'urlscan (enviar análise)': ok({ message: 'Scan prevented ...', description: 'domínio bloqueado' }, 400), 'urlscan (última análise)': resultadoUrlscan({ visibilidade: 'public' }) }).inteligencia;
+  assert.match(r.fontes.urlscan.erroEnvio, /Scan prevented/);
+  assert.strictEqual(r.fontes.urlscan.analise.propria, false);
+});
+teste('análise que não terminou a tempo deixa link para ver depois', () => {
+  const r = consolidar({ 'urlscan (enviar análise)': enviado, 'urlscan (resultado)': ok({ message: 'not found' }, 404) }).inteligencia;
+  assert.match(r.fontes.urlscan.erroEnvio, /não terminou/);
+  assert.match(r.fontes.urlscan.linkPendente, /^https:\/\/urlscan\.io\/result\//);
+});
+
 // ---------------------------------------------------------------- Parecer final (travas da IA)
 console.log('Parecer final');
 const parecer = (aud, saidaIA) => {
@@ -319,6 +376,8 @@ const malicioso = '<script>alert(1)</script><img src=x onerror=alert(2)>';
 const audRelatorio = consolidar({
   'VirusTotal (domínio)': vtStats(2, { categories: { x: malicioso }, last_analysis_results: { M: { category: 'malicious', result: malicioso } } }),
   'Shodan InternetDB': ok({ ports: [3389], vulns: [malicioso], tags: [malicioso] }),
+  'urlscan (enviar análise)': enviado,
+  'urlscan (resultado)': ok({ task: { uuid: 'abc', time: '2026-11-06', visibility: 'private' }, page: { title: malicioso, domain: 'exemplo.com.br' }, verdicts: { overall: { brands: [malicioso] } }, lists: { domains: ['mal.exemplo.net', malicioso] } }),
 }, { ...completo, server: malicioso, 'x-teste': '"><svg onload=alert(3)>', 'set-cookie': [`${malicioso}=1`] });
 audRelatorio.urlOriginal = 'javascript:alert(4)';
 const final = parecer(audRelatorio, respostaIA({ veredito: 'suspeito', nota: 50, confianca: 'media', resumo: malicioso, evidencias: [malicioso], acoes: [malicioso], mitre: [malicioso] }));
@@ -336,6 +395,11 @@ teste('link javascript: não vira link', () => assert.ok(!relatorio.html.include
 teste('endereço do alvo não vira link clicável (sai desarmado)', () => {
   assert.ok(!relatorio.html.includes('href="https://exemplo.com.br'));
   assert.ok(relatorio.textoChamado.includes('exemplo[.]com[.]br'));
+});
+teste('urlscan aparece no relatório, com domínios desarmados', () => {
+  assert.match(relatorio.html, /urlscan\.io/);
+  assert.ok(relatorio.html.includes('mal[.]exemplo[.]net'));
+  assert.ok(relatorio.html.includes('href="https://urlscan.io/result/abc/"'));
 });
 teste('Markdown da IA é formatado', () => {
   assert.ok(relatorio.html.includes('<strong>negrito</strong>'));
