@@ -34,5 +34,7 @@ return [{
     // Nunca "public": só "private" (padrão) ou "unlisted".
     urlscanAnalisar: Boolean(pagina.visitado),
     urlscanVisibilidade: config.urlscanVisibilidade === 'unlisted' ? 'unlisted' : 'private',
+    // Cache por URL e por modo (o modo completo guarda a análise privada do urlscan; o outro, não).
+    chaveCache: `${config.prefixoCache || 'scanner:'}intel:${config.modo === 'completa' ? 'completa' : 'reputacao'}:${base64Url(pagina.urlFinal)}`,
   },
 }];

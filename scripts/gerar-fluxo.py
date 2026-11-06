@@ -23,6 +23,8 @@ CRED_ABUSECH = {"httpHeaderAuth": {"id": "scanAbusechKey01", "name": "abuse.ch (
 CRED_OTX = {"httpHeaderAuth": {"id": "scanOtxApiKey001", "name": "OTX (X-OTX-API-KEY)"}}
 CRED_ABUSEIPDB = {"httpHeaderAuth": {"id": "scanAbuseipdb001", "name": "AbuseIPDB (Key)"}}
 CRED_URLSCAN = {"httpHeaderAuth": {"id": "scanUrlscanKey01", "name": "urlscan.io (API-Key)"}}
+# Redis é opcional: sem ele (ou se falhar), o fluxo só não usa cache.
+CRED_REDIS = {"redis": {"id": "scanRedis0000001", "name": "Redis (scanner)"}}
 # Apelido do Google para o Flash-Lite mais recente. No plano grátis ele tem cota bem maior que o
 # Flash (que dava 429/503 com 2 chamadas por análise). Troque por "models/gemini-flash-latest" se tiver cota.
 MODELO_GEMINI = "models/gemini-flash-lite-latest"
@@ -140,6 +142,9 @@ no("Configuração", "n8n-nodes-base.set", 3.4, [-1140, 400], {
         {"id": id_no("cfg-limite"), "name": "limiteConteudo", "value": 60000, "type": "number"},
         # "private" (só você vê; 50/dia no plano grátis) ou "unlisted". "public" nunca é usado.
         {"id": id_no("cfg-urlscan"), "name": "urlscanVisibilidade", "value": "private", "type": "string"},
+        # Cache das fontes de reputação no Redis (por URL e modo). Se uma fonte falhar, fica só 1 h.
+        {"id": id_no("cfg-cache-horas"), "name": "cacheHoras", "value": 24, "type": "number"},
+        {"id": id_no("cfg-cache-prefixo"), "name": "prefixoCache", "value": "scanner:", "type": "string"},
     ]},
     "options": {},
 })
@@ -204,6 +209,15 @@ def consulta(nome, posicao, url, credencial=None, metodo="GET", corpo=None, cabe
     extra = {"credentials": credencial} if credencial else {}
     no(nome, "n8n-nodes-base.httpRequest", 4.2, posicao, parametros, onError="continueRegularOutput", **extra)
 
+
+# Cache: se a mesma URL foi analisada (no mesmo modo) nas últimas 24 h, reaproveita as respostas
+# das fontes e não gasta cota. A leitura da página e a postura são sempre refeitas.
+no("Ler cache (Redis)", "n8n-nodes-base.redis", 1, [1280, 480], {
+    "operation": "get", "propertyName": "cache", "keyType": "string",
+    "key": f"={{{{ {ALVO}.chaveCache }}}}", "options": {},
+}, credentials=CRED_REDIS, onError="continueRegularOutput", alwaysOutputData=True)
+no_codigo("Usar cache", [1390, 600], "usar-cache.js")
+no("Cache válido?", "n8n-nodes-base.if", 2.2, [1500, 480], condicao_if("={{ $json.hit }}", VERDADEIRO))
 
 # urlscan.io: histórico do host (os dois modos) e análise PRIVADA nova (só no modo completo).
 # A análise roda no urlscan enquanto as outras fontes são consultadas; o resultado é buscado no fim.
@@ -279,6 +293,13 @@ no("Resultado pronto?", "n8n-nodes-base.if", 2.2, [2380, 760], condicao_if(
 
 no_codigo("Processar resultados", [2600, 760], "processar-resultados.js")
 no_codigo("Consolidar inteligência", [2820, 760], "consolidar-inteligencia.js", "dominio.js")
+
+no("Gravar cache?", "n8n-nodes-base.if", 2.2, [2820, 960], condicao_if("={{ !$('Usar cache').first().json.hit }}", VERDADEIRO))
+no_codigo("Montar cache", [3040, 960], "montar-cache.js")
+no("Guardar cache (Redis)", "n8n-nodes-base.redis", 1, [3260, 960], {
+    "operation": "set", "keyType": "string", "expire": True,
+    "key": "={{ $json.chave }}", "value": "={{ $json.valor }}", "ttl": "={{ $json.ttl }}",
+}, credentials=CRED_REDIS, onError="continueRegularOutput", alwaysOutputData=True)
 
 # ---------------- Análise pela IA (Google Gemini) ----------------
 SISTEMA_CONTEUDO = """Você é especialista em segurança web e em análise de phishing e malware. Responda SEMPRE em português do Brasil, em Markdown.
@@ -423,6 +444,7 @@ nota("Nota - Como configurar", [-1420, -160], 520, 520, 4, """## Como configurar
    - `AbuseIPDB (Key)`: cabeçalho `Key`
    - `urlscan.io (API-Key)`: cabeçalho `API-Key`
    Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.
+   - *Redis* (opcional, para o cache): credencial do tipo Redis. Sem ela, o fluxo só não usa cache.
 3. **Outlook (opcional):** veja o README; no nó **Configuração**, `enviarEmail` = `true` e `emailDestino`.
 4. **Publique** o fluxo (salvar não publica): http://127.0.0.1:5678/form/scanner-seguranca-web
 
@@ -438,7 +460,7 @@ O n8n roda numa rede com outros serviços. Sem proteção, alguém poderia pedir
 
 nota("Nota - Inteligência", [1460, -100], 1100, 280, 5, """## Inteligência de ameaças (só consultas, nada é enviado para análise pública)
 **urlscan.io** (histórico do host; no modo completo, análise PRIVADA num navegador real), **VirusTotal** (URL exata e domínio), **URLhaus** e **ThreatFox** (abuse.ch), **OTX**, **AbuseIPDB** e **Shodan InternetDB** (IP), **RDAP** (idade do domínio), **SPF/DMARC** (dns.google).
-Cota grátis do VirusTotal: 4 consultas/min e 500/dia; cada análise usa 2.
+Cota grátis do VirusTotal: 4 consultas/min e 500/dia; cada análise usa 2. **Cache no Redis** (24 h por URL e modo, 1 h se uma fonte falhou): repetir a mesma URL não gasta cota.
 
 **Consolidar inteligência** calcula sinais, um veredito e uma nota automáticos. Só casamento EXATO da URL/host pesa forte: plataformas populares (github.com, drive.google.com) hospedam arquivos de terceiros e aparecem nas listas.""")
 
@@ -474,7 +496,11 @@ ligacoes = [
     liga("Tratar resposta", ["Seguir redirecionamento?"]),
     liga("Seguir redirecionamento?", ["Validar URL"], 0),
     liga("Seguir redirecionamento?", ["Preparar consultas"], 1),
-    liga("Preparar consultas", ["urlscan (busca)"]),
+    liga("Preparar consultas", ["Ler cache (Redis)"]),
+    liga("Ler cache (Redis)", ["Usar cache"]),
+    liga("Usar cache", ["Cache válido?"]),
+    liga("Cache válido?", ["Consultar Observatory?"], 0),
+    liga("Cache válido?", ["urlscan (busca)"], 1),
     liga("urlscan (busca)", ["Analisar no urlscan?"]),
     liga("Analisar no urlscan?", ["urlscan (enviar análise)"], 0),
     liga("Analisar no urlscan?", ["Tem análise anterior?"], 1),
@@ -494,7 +520,11 @@ ligacoes = [
     liga("Resultado pronto?", ["Processar resultados"], 0),
     liga("Resultado pronto?", ["Esperar urlscan"], 1),
     liga("Processar resultados", ["Consolidar inteligência"]),
-    liga("Consolidar inteligência", ["Ler conteúdo?"]),
+    liga("Consolidar inteligência", ["Gravar cache?"]),
+    liga("Gravar cache?", ["Montar cache"], 0),
+    liga("Gravar cache?", ["Ler conteúdo?"], 1),
+    liga("Montar cache", ["Guardar cache (Redis)"]),
+    liga("Guardar cache (Redis)", ["Ler conteúdo?"]),
     liga("Ler conteúdo?", ["IA - conteúdo"], 0),
     liga("Ler conteúdo?", ["Montar dossiê"], 1),
     liga("IA - conteúdo", ["Montar dossiê"]),

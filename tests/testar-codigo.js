@@ -332,6 +332,64 @@ teste('análise que não terminou a tempo deixa link para ver depois', () => {
   assert.match(r.fontes.urlscan.linkPendente, /^https:\/\/urlscan\.io\/result\//);
 });
 
+// ---------------------------------------------------------------- Cache (Redis)
+console.log('Cache');
+const prepCache = preparar(pagina({}));
+const usar = (cache) => executar('usar-cache.js', [], { cache }, { 'Preparar consultas': prepCache });
+const montar = (respostas, falharam = []) => executar('montar-cache.js', [], {}, {
+  ...respostas,
+  'Preparar consultas': prepCache,
+  'Configuração': { cacheHoras: 24 },
+  'Consolidar inteligência': { auditoria: { inteligencia: { falharam } } },
+});
+teste('chave do cache muda com o modo', () => {
+  const completa = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa' } }).chaveCache;
+  const reputacao = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'reputacao' } }).chaveCache;
+  assert.notStrictEqual(completa, reputacao);
+  assert.match(completa, /^scanner:intel:completa:/);
+});
+teste('sem cache, cache estragado ou de outra URL: consulta normal', () => {
+  assert.strictEqual(usar(null).hit, false);
+  assert.strictEqual(usar('{isto não é json').hit, false);
+  assert.strictEqual(usar(JSON.stringify({ versao: 1, urlFinal: 'https://outro.com/', respostas: {} })).hit, false);
+  assert.strictEqual(usar(JSON.stringify({ versao: 99, urlFinal: prepCache.urlFinal, respostas: {} })).hit, false);
+});
+teste('ida e volta: o veredito do cache é o mesmo da consulta ao vivo', () => {
+  const vivas = { ...limpoBase, 'ThreatFox': ok({ query_status: 'ok', data: [{ ioc: 'exemplo.com.br', malware_printable: 'X', threat_type: 'botnet_cc', confidence_level: 90 }] }) };
+  const aoVivo = consolidar(vivas).inteligencia;
+  const guardado = montar(vivas);
+  const lido = usar(guardado.valor);
+  assert.strictEqual(lido.hit, true);
+  // Consolida SÓ com o cache (os nós de consulta "não rodaram").
+  const prep = preparar(pagina(completo));
+  const aud = executar('processar-resultados.js', [], {}, { 'Preparar consultas': prep });
+  const doCache = executar('consolidar-inteligencia.js', ['dominio.js'], aud, { 'Preparar consultas': prep, 'Usar cache': lido }).auditoria.inteligencia;
+  assert.strictEqual(doCache.vereditoAutomatico, aoVivo.vereditoAutomatico);
+  assert.strictEqual(doCache.vereditoAutomatico, 'malicioso');
+  assert.strictEqual(doCache.cache.usado, true);
+});
+teste('cache guarda 24 h, ou 1 h se uma fonte falhou', () => {
+  assert.strictEqual(montar(limpoBase).ttl, 86400);
+  assert.strictEqual(montar(limpoBase, ['VirusTotal (URL): cota esgotada']).ttl, 3600);
+});
+teste('erro de rede não vai para o cache', () => {
+  const r = JSON.parse(montar({ ...limpoBase, 'OTX': { error: { message: 'ETIMEDOUT' } } }).valor);
+  assert.ok(!('OTX' in r.respostas));
+  assert.ok('URLhaus' in r.respostas);
+});
+teste('cache é enxuto (VirusTotal sem whois, urlscan sem requisições)', () => {
+  const r = JSON.parse(montar({
+    ...limpoBase,
+    'VirusTotal (domínio)': vtStats(0, { whois: 'x'.repeat(50000), last_analysis_results: { A: { category: 'harmless' }, B: { category: 'malicious', result: 'phishing' } } }),
+    'urlscan (resultado)': ok({ task: { uuid: 'u' }, data: { requests: 'y'.repeat(50000) }, lists: { domains: ['a.com'], urls: ['z'] } }),
+  }).valor);
+  const at = r.respostas['VirusTotal (domínio)'].body.data.attributes;
+  assert.ok(!at.whois);
+  assert.deepStrictEqual(Object.keys(at.last_analysis_results), ['B']);
+  assert.ok(!r.respostas['urlscan (resultado)'].body.data);
+  assert.ok(JSON.stringify(r).length < 10000);
+});
+
 // ---------------------------------------------------------------- Parecer final (travas da IA)
 console.log('Parecer final');
 const parecer = (aud, saidaIA) => {
