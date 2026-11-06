@@ -9,7 +9,9 @@ Fluxo do **n8n** que dá a um analista de SOC o **parecer de segurança de um si
 
 O parecer é escrito por uma **IA analista SOC** (Google Gemini), mas passa por **travas automáticas**. Evidência forte nunca vira "limpo", e se a IA falhar o relatório sai com o parecer calculado pelas regras.
 
-![Exemplo de relatório](docs/exemplo-relatorio.png)
+![Exemplo de relatório: parecer do analista SOC para uol.com.br, com o falso positivo isolado do VirusTotal explicado](docs/exemplo-relatorio.png)
+
+*Exemplo real: portal legítimo com 1 detecção isolada no VirusTotal. O parecer explica que é falso positivo e recomenda liberar.*
 
 ## Dois modos
 
@@ -247,6 +249,18 @@ scanner-seguranca-web/
 ├── workflow/scanner-seguranca-web.json   (gerado; é este que se importa no n8n)
 └── docs/exemplo-relatorio.png
 ```
+
+## Roteiro (próximas melhorias)
+
+Ideias já aprovadas, a fazer uma de cada vez:
+
+| Melhoria | Para que serve | Como |
+|---|---|---|
+| **Cache das consultas** | Não gastar cota repetindo o mesmo site (o VirusTotal grátis permite 500 consultas por dia) e responder mais rápido | Guardar o resultado de cada fonte no Redis por 24 h (1 h se a fonte falhou), com chave pelo hash do host/URL, como já faz a reputação de IP do laboratório NG-SOC |
+| **Chamado e aviso automáticos** | Veredito "malicioso" não depender de alguém ler o relatório | Abrir chamado no GLPI com o "texto para o chamado" e os IOCs, e avisar no Telegram do SOC. O bloqueio continua sempre com aprovação humana |
+| **urlscan.io** | Ver a página como um navegador de verdade: print, domínios contatados, scripts carregados, formulários | Envio com visibilidade **unlisted**. No plano grátis, a análise pode ficar visível para pesquisadores do urlscan, então será opcional e só no modo completo |
+
+Outras ideias: consultar também o domínio original quando a cadeia de redirecionamentos passa por outro domínio (encurtadores), e cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
 
 ## Uso ético
 
