@@ -3,7 +3,7 @@
 Fluxo do **n8n** que dá a um analista de SOC o **parecer de segurança de um site**. Você informa o endereço (por exemplo, um link que chegou num e-mail suspeito) e recebe na tela, e opcionalmente por e-mail (Outlook), um relatório com:
 
 - **veredito** (limpo, suspeito, malicioso ou indeterminado), **nota de 0 a 100**, gravidade e confiança;
-- **evidências** de bases de ameaças (VirusTotal, URLhaus, ThreatFox, OTX, AbuseIPDB, Shodan), com possíveis falsos positivos explicados;
+- **evidências** de bases de ameaças (urlscan.io, VirusTotal, URLhaus, ThreatFox, OTX, AbuseIPDB, Shodan), com possíveis falsos positivos explicados;
 - **ações recomendadas** para o SOC, técnicas **MITRE ATT&CK** e **IOCs desarmados** (`hxxps://exemplo[.]com`) prontos para colar no chamado;
 - **postura do site**: nota de A+ a F pelos cabeçalhos de segurança e correções para quem mantém o site.
 
@@ -17,8 +17,8 @@ O parecer é escrito por uma **IA analista SOC** (Google Gemini), mas passa por 
 
 | Modo | O que faz | Quando usar |
 |---|---|---|
-| **Só reputação** | Consulta as bases de ameaças, o registro do domínio e o DNS. **O site não é acessado**, nem pelo scanner nem pelo Mozilla Observatory. | Link suspeito de phishing ou malware: não avisa quem controla o domínio e não expõe o IP da sua rede. Funciona até com domínio já derrubado. |
-| **Completa** | Tudo acima, mais **uma leitura** da página (como um navegador, sem executar JavaScript e sem testar ataques). Avalia cabeçalhos, cookies e conteúdo. | Seus sites, ou sites que você tem autorização para avaliar. |
+| **Só reputação** | Consulta as bases de ameaças, o registro do domínio e o DNS, e lê a análise **anterior** mais recente do urlscan.io. **O site não é acessado**: nem pelo scanner, nem pelo Mozilla Observatory, nem por uma análise nova do urlscan. | Link suspeito de phishing ou malware: não avisa quem controla o domínio e não expõe o IP da sua rede. Funciona até com domínio já derrubado. |
+| **Completa** | Tudo acima, mais **uma leitura** da página pelo scanner (sem executar JavaScript e sem testar ataques) e uma **análise privada no urlscan.io**, que abre o site num navegador real em outra rede. Avalia cabeçalhos, cookies, conteúdo e o que a página carrega. | Seus sites, ou sites que você tem autorização para avaliar. |
 
 Se o modo vier com um valor inesperado, o fluxo assume **só reputação**: na dúvida, ele não acessa o site.
 
@@ -28,6 +28,7 @@ O campo **Contexto** (opcional) recebe de onde veio o link, por exemplo: "e-mail
 
 | Área | Fonte | O que mostra |
 |---|---|---|
+| **Navegador real** | urlscan.io | Modo completo: análise **privada** com print, domínios e IPs contatados, marca imitada (phishing), veredito e certificado. Modo só reputação: veredito da análise anterior mais recente e histórico do host |
 | **Reputação da URL** | VirusTotal (URL exata) | Quantos motores marcam a URL como maliciosa e quais |
 | **Reputação do domínio** | VirusTotal (domínio ou IP) | Detecções, reputação da comunidade, categorias, ranking de popularidade, certificado |
 | **Distribuição de malware** | URLhaus (abuse.ch) | Se a URL ou o host distribuem malware agora, família (ex.: GuLoader), Spamhaus DBL |
@@ -49,6 +50,7 @@ Plataformas grandes como `github.com` e `drive.google.com` hospedam arquivos de 
 
 - só o casamento **exato** da URL ou do host analisado pesa forte;
 - domínios **populares** (top 100 mil em algum ranking, ou na lista de confiáveis do OTX) têm as listagens "do host" rebaixadas para informação;
+- **tags do histórico do urlscan** só informam: qualquer um, inclusive robôs, coloca tags (o `example.com` tem análises marcadas "phishing");
 - **1 motor isolado** no VirusTotal não condena (o `uol.com.br`, por exemplo, tem 1 detecção);
 - site legítimo **comprometido** continua malicioso: domínio antigo com malware ativo no host ou na URL exata.
 
@@ -63,8 +65,10 @@ flowchart LR
     M -->|só reputação| SV[Sem visita]
     B --> P[Preparar consultas]
     SV --> P
-    P --> I[VirusTotal · URLhaus · ThreatFox · OTX<br/>AbuseIPDB · Shodan · RDAP · SPF/DMARC<br/>Observatory só no modo completo]
-    I --> R[Regras: postura A+ a F<br/>sinais, veredito e nota automáticos]
+    P --> U[urlscan.io<br/>completa: análise privada<br/>só reputação: análise anterior]
+    U --> I[VirusTotal · URLhaus · ThreatFox · OTX<br/>AbuseIPDB · Shodan · RDAP · SPF/DMARC<br/>Observatory só no modo completo]
+    I --> W[Espera o resultado do urlscan<br/>até ~70 s]
+    W --> R[Regras: postura A+ a F<br/>sinais, veredito e nota automáticos]
     R --> IC[IA - conteúdo<br/>lê o HTML]
     R --> D[Montar dossiê]
     IC --> D
@@ -86,7 +90,7 @@ A antiga IA de "configuração" (que comentava os cabeçalhos) foi incorporada: 
 | Teto da nota por veredito: malicioso 30, suspeito 70 | A nota sempre combina com o veredito |
 | IA fora do ar, sem cota ou fora do formato: vale o parecer automático, com ações padrão | O relatório sempre sai |
 
-**Nota automática (0 a 100):** começa em 100 e cada sinal desconta pontos. Exemplos: URL no URLhaus online −50, host exato no ThreatFox −45, domínio com menos de 30 dias −25, VirusTotal com 3+ motores na URL −50, postura F −12, sem SPF −3. Com evidência maliciosa a nota fica em no máximo 20; com evidência suspeita, em no máximo 60.
+**Nota automática (0 a 100):** começa em 100 e cada sinal desconta pontos. Exemplos: URL no URLhaus online −50, urlscan classificou como malicioso −45, marca imitada que não combina com o domínio −20, host exato no ThreatFox −45, domínio com menos de 30 dias −25, VirusTotal com 3+ motores na URL −50, postura F −12, sem SPF −3. Com evidência maliciosa a nota fica em no máximo 20; com evidência suspeita, em no máximo 60.
 
 ## Segurança do próprio scanner
 
@@ -112,7 +116,7 @@ Limitações conhecidas: entre a checagem de DNS e o acesso existe uma janela pe
 
 - **n8n 2.x** (testado no 2.46.4), por exemplo em Docker.
 - Chave gratuita do **Google Gemini**: https://aistudio.google.com/apikey (modelo `gemini-flash-lite-latest`, que tem cota grátis maior; o `gemini-flash-latest` dava erro 429 com duas chamadas por análise).
-- Chaves gratuitas das fontes de reputação (todas opcionais: sem a chave, a fonte é pulada): **VirusTotal**, **abuse.ch** (URLhaus e ThreatFox), **OTX** e **AbuseIPDB**. Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.
+- Chaves gratuitas das fontes de reputação (todas opcionais: sem a chave, a fonte é pulada): **urlscan.io**, **VirusTotal**, **abuse.ch** (URLhaus e ThreatFox), **OTX** e **AbuseIPDB**. Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.
 - *(Opcional)* Conta Microsoft (Outlook/Hotmail pessoal ou corporativa) e um app registrado no **Entra ID**, para enviar o relatório por e-mail.
 - Para desenvolver: Python 3 (gerador do fluxo) e Node.js (testes).
 
@@ -155,10 +159,11 @@ O script só cria as credenciais cujas chaves estão preenchidas, nunca imprime 
 | abuse.ch (Auth-Key) | *Header Auth* | `Auth-Key` | https://auth.abuse.ch/ |
 | OTX (X-OTX-API-KEY) | *Header Auth* | `X-OTX-API-KEY` | https://otx.alienvault.com/api |
 | AbuseIPDB (Key) | *Header Auth* | `Key` | https://www.abuseipdb.com/account/api |
+| urlscan.io (API-Key) | *Header Auth* | `API-Key` | https://urlscan.io/user/signup (depois, *Settings & API*) |
 
 O `importar-fluxo.sh` liga os nós às credenciais existentes pelo nome (ou pelo tipo, quando só existe uma daquele tipo).
 
-**Cotas grátis:** VirusTotal 4 consultas por minuto e 500 por dia (cada análise usa 2, então dá umas 2 análises por minuto); AbuseIPDB 1.000 por dia. Se a cota acabar, o relatório mostra "cota esgotada" naquela fonte e segue com as outras.
+**Cotas grátis:** VirusTotal 4 consultas por minuto e 500 por dia (cada análise usa 2, então dá umas 2 análises por minuto); AbuseIPDB 1.000 por dia; urlscan.io 50 análises **privadas** por dia (5 por minuto) e 1.000 buscas por dia. Se a cota acabar, o relatório mostra "cota esgotada" naquela fonte e segue com as outras.
 
 ### Outlook (opcional)
 
@@ -182,10 +187,10 @@ Abra o formulário (com n8n local):
 http://127.0.0.1:5678/form/scanner-seguranca-web
 ```
 
-Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputação**), descreva opcionalmente o **contexto** e clique em **Analisar site**. Em 20 a 60 segundos o relatório aparece na tela, nesta ordem:
+Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputação**), descreva opcionalmente o **contexto** e clique em **Analisar site**. Em 20 a 60 segundos (até 2 minutos no modo completo, por causa do urlscan) o relatório aparece na tela, nesta ordem:
 
 1. **Parecer do analista SOC:** veredito, nota de 0 a 100, gravidade, confiança, resumo, evidências, possíveis falsos positivos, ações recomendadas, correções e MITRE ATT&CK.
-2. **Reputação e inteligência:** o que cada fonte disse, com link para abrir no site da fonte.
+2. **Reputação e inteligência:** o que cada fonte disse, com link para abrir no site da fonte (no urlscan, também o print da página; a análise privada abre logado na sua conta).
 3. **Sinais de risco:** cada regra que descontou pontos, e quanto.
 4. **Domínio, DNS e infraestrutura:** idade do domínio, certificado, SPF/DMARC/DNSSEC, portas e CVEs (Shodan), nota do Mozilla Observatory.
 5. **IOCs e texto para o chamado:** bloco pronto para colar no GLPI ou em outro sistema de chamados.
@@ -200,6 +205,7 @@ Outros ajustes no nó **Configuração**:
 | `enviarEmail` | `false` | Envia também por Outlook |
 | `emailDestino` | vazio | Quem recebe o relatório |
 | `limiteConteudo` | `60000` | Quantos caracteres do HTML vão para a IA |
+| `urlscanVisibilidade` | `private` | `private` (só você vê) ou `unlisted`. **Nunca** `public`: qualquer outro valor vira `private` |
 
 ## Como a nota de postura (A+ a F) é calculada
 
@@ -224,7 +230,7 @@ Uma CSP com `'unsafe-inline'` (sem nonce ou hash) desce a nota um degrau. **Sem 
 O código de cada nó *Code* fica em [src/](src/), em arquivos `.js` legíveis, e as bibliotecas comuns ficam em [src/lib/](src/lib/). O JSON do fluxo é **gerado** a partir deles:
 
 ```bash
-node tests/testar-codigo.js      # 116 testes: SSRF, DNS, modo só reputação, falsos positivos, travas da IA, escape do HTML
+node tests/testar-codigo.js      # 126 testes: SSRF, DNS, modo só reputação, urlscan, falsos positivos, travas da IA, escape do HTML
 python scripts/gerar-fluxo.py    # gera workflow/scanner-seguranca-web.json
 ```
 
@@ -252,13 +258,12 @@ scanner-seguranca-web/
 
 ## Roteiro (próximas melhorias)
 
-Ideias já aprovadas, a fazer uma de cada vez:
+Ideias já aprovadas, a fazer uma de cada vez (a integração com o **urlscan.io** já foi feita):
 
 | Melhoria | Para que serve | Como |
 |---|---|---|
 | **Cache das consultas** | Não gastar cota repetindo o mesmo site (o VirusTotal grátis permite 500 consultas por dia) e responder mais rápido | Guardar o resultado de cada fonte no Redis por 24 h (1 h se a fonte falhou), com chave pelo hash do host/URL, como já faz a reputação de IP do laboratório NG-SOC |
 | **Chamado e aviso automáticos** | Veredito "malicioso" não depender de alguém ler o relatório | Abrir chamado no GLPI com o "texto para o chamado" e os IOCs, e avisar no Telegram do SOC. O bloqueio continua sempre com aprovação humana |
-| **urlscan.io** | Ver a página como um navegador de verdade: print, domínios contatados, scripts carregados, formulários | Envio com visibilidade **unlisted**. No plano grátis, a análise pode ficar visível para pesquisadores do urlscan, então será opcional e só no modo completo |
 
 Outras ideias: consultar também o domínio original quando a cadeia de redirecionamentos passa por outro domínio (encurtadores), e cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
 

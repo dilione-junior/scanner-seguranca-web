@@ -80,6 +80,21 @@ function blocoInteligencia() {
   const lk = (url, texto = 'abrir') => (url ? ` · ${linkSeguro(url).replace(/>https?:[^<]*</, `>${texto}<`)}` : '');
   const linhas = [];
   const add = (fonte, texto) => linhas.push(`<tr><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-weight:bold;white-space:nowrap;vertical-align:top">${fonte}</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">${texto}</td></tr>`);
+  if (f.urlscan) {
+    const u = f.urlscan;
+    const an = u.analise;
+    const partes = [];
+    if (an) {
+      partes.push(`${an.malicioso ? '<strong style="color:#b91c1c">página classificada como maliciosa</strong>' : 'sem veredito malicioso'} (pontuação ${escapar(an.pontuacao)}) · ${an.propria ? `análise feita agora (${escapar(an.visibilidade)})` : `análise anterior de ${escapar(an.data)}`}`);
+      if (an.marcas.length) partes.push(`<span style="color:#b91c1c">Marca imitada: ${escapar(an.marcas.join(', '))}</span>`);
+      if (an.titulo) partes.push(`Título: ${escapar(an.titulo)}`);
+      partes.push(`Contatou ${escapar(an.totalDominios)} domínio(s) e ${escapar(an.totalIps)} IP(s)${an.paises.length ? ` em ${escapar(an.paises.join(', '))}` : ''}${an.dominiosContatados.length ? `: ${escapar(an.dominiosContatados.slice(0, 8).map(desarmar).join(', '))}${an.totalDominios > 8 ? '...' : ''}` : ''}`);
+      partes.push(`${lk(an.link, 'abrir análise').replace(/^ · /, '')}${lk(an.print, 'print da página')}${an.visibilidade === 'private' ? ' <span style="color:#64748b">(privada: abre logado na sua conta)</span>' : ''}`);
+    } else partes.push('Nenhuma análise disponível.');
+    if (u.erroEnvio) partes.push(`<span style="color:#b45309">Análise nova: ${escapar(u.erroEnvio)}</span>${lk(u.linkPendente, 'ver depois')}`);
+    partes.push(`Histórico: ${u.historico.total >= 10000 ? 'mais de 10.000' : escapar(u.historico.total)} análise(s) do host${u.historico.tags.length ? ` · tags (não verificadas): ${escapar(u.historico.tags.join(', '))}` : ''}`);
+    add('urlscan.io', partes.join('<br>'));
+  }
   if (f.vtUrl) add('VirusTotal (URL)', f.vtUrl.naoVista ? 'URL nunca analisada (não foi enviada: o scanner só consulta).'
     : `${f.vtUrl.malicioso} malicioso · ${f.vtUrl.suspeito} suspeito · ${f.vtUrl.inofensivo} inofensivo${f.vtUrl.ultimaAnalise ? ` (análise de ${escapar(f.vtUrl.ultimaAnalise)})` : ''}${f.vtUrl.motores.length ? `<br><span style="color:#b91c1c">${escapar(f.vtUrl.motores.join('; '))}</span>` : ''}${lk(f.vtUrl.link)}`);
   if (f.vtDominio) add(`VirusTotal (${a.ehIP ? 'IP' : 'domínio'})`, `${f.vtDominio.malicioso} malicioso · ${f.vtDominio.suspeito} suspeito · reputação ${escapar(f.vtDominio.reputacao)}${f.vtDominio.melhorRank ? ` · ranking ${escapar(f.vtDominio.fonteRank)} #${escapar(f.vtDominio.melhorRank)}` : ''}${f.vtDominio.categorias.length ? `<br>Categorias: ${escapar(f.vtDominio.categorias.join(', '))}` : ''}${f.vtDominio.motores.length ? `<br><span style="color:#b91c1c">${escapar(f.vtDominio.motores.join('; '))}</span>` : ''}${lk(f.vtDominio.link)}`);

@@ -7,6 +7,7 @@
 #   ABUSECH_AUTH_KEY    -> "abuse.ch (Auth-Key)"      (URLhaus e ThreatFox)
 #   OTX_API_KEY         -> "OTX (X-OTX-API-KEY)"
 #   ABUSEIPDB_API_KEY   -> "AbuseIPDB (Key)"
+#   URLSCAN_API_KEY     -> "urlscan.io (API-Key)"
 #
 # Só cria as credenciais cujas chaves estão preenchidas. Se já existir no n8n uma credencial com o
 # mesmo nome (por exemplo, criada pela tela ou por outro projeto), ela é mantida e não é duplicada.
@@ -54,6 +55,7 @@ candidatas = [
     cabecalho("scanAbusechKey01", "abuse.ch (Auth-Key)", "Auth-Key", "ABUSECH_AUTH_KEY"),
     cabecalho("scanOtxApiKey001", "OTX (X-OTX-API-KEY)", "X-OTX-API-KEY", "OTX_API_KEY"),
     cabecalho("scanAbuseipdb001", "AbuseIPDB (Key)", "Key", "ABUSEIPDB_API_KEY"),
+    cabecalho("scanUrlscanKey01", "urlscan.io (API-Key)", "API-Key", "URLSCAN_API_KEY"),
 ]
 criar = []
 for c in candidatas:

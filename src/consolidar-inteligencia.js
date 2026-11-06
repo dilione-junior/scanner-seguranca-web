@@ -284,6 +284,92 @@ if (!a.ehIP) {
   } else if (r.executada) registra('Mozilla Observatory', false, r.corpo?.error ? textoCurto(r.corpo.error, 80) : erroDeFonte(r));
 }
 
+// ---------------- urlscan.io: histórico e análise num navegador real ----------------
+{
+  const busca = resposta('urlscan (busca)');
+  const resultados = Array.isArray(busca.corpo?.results) ? busca.corpo.results : [];
+  const envio = resposta('urlscan (enviar análise)');
+  const nova = resposta('urlscan (resultado)');
+  const anterior = resposta('urlscan (última análise)');
+
+  if (busca.ok || envio.executada) {
+    const historico = {
+      total: Number(busca.corpo?.total ?? resultados.length),
+      ultimas: resultados.slice(0, 5).map((r) => ({
+        data: textoCurto(r.task?.time, 10),
+        url: textoCurto(r.page?.url ?? r.task?.url, 160),
+        tags: (r.task?.tags ?? []).map((t) => textoCurto(t, 30)).slice(0, 4),
+      })),
+      // Tags vêm de quem enviou a análise (inclusive robôs) e erram muito: só informam.
+      tags: [...new Set(resultados.flatMap((r) => r.task?.tags ?? []).map((t) => textoCurto(t, 30)))].slice(0, 8),
+    };
+
+    // Lê um resultado completo (análise nova ou anterior) no mesmo formato.
+    const ler = (r, propria) => {
+      const c = r.corpo;
+      if (!r.ok || !c?.task) return null;
+      const geral = c.verdicts?.overall ?? {};
+      const marcas = (geral.brands ?? []).map((b) => textoCurto(typeof b === 'string' ? b : b?.name ?? b?.key, 40)).filter(Boolean);
+      return {
+        propria,
+        uuid: textoCurto(c.task.uuid, 40),
+        data: textoCurto(c.task.time, 10),
+        visibilidade: textoCurto(c.task.visibility, 12),
+        url: textoCurto(c.page?.url, 200),
+        titulo: textoCurto(c.page?.title, 120),
+        dominioFinal: textoCurto(c.page?.domain, 100),
+        ip: textoCurto(c.page?.ip, 45),
+        pais: textoCurto(c.page?.country, 4),
+        asn: textoCurto(`${c.page?.asn ?? ''} ${c.page?.asnname ?? ''}`, 80),
+        emissorTls: textoCurto(c.page?.tlsIssuer, 80),
+        idadeTlsDias: Number.isFinite(Number(c.page?.tlsAgeDays)) ? Number(c.page.tlsAgeDays) : null,
+        malicioso: Boolean(geral.malicious),
+        pontuacao: Number(geral.score ?? 0),
+        marcas,
+        categorias: (geral.categories ?? []).map((x) => textoCurto(x, 30)).slice(0, 5),
+        dominiosContatados: (c.lists?.domains ?? []).map((d) => textoCurto(d, 80)).slice(0, 15),
+        totalDominios: (c.lists?.domains ?? []).length,
+        totalIps: (c.lists?.ips ?? []).length,
+        paises: (c.lists?.countries ?? []).map((x) => textoCurto(x, 4)).slice(0, 8),
+        link: `https://urlscan.io/result/${encodeURIComponent(c.task.uuid)}/`,
+        print: `https://urlscan.io/screenshots/${encodeURIComponent(c.task.uuid)}.png`,
+      };
+    };
+
+    let analise = ler(nova, true) ?? ler(anterior, false);
+    let erroEnvio = '';
+    if (envio.executada && !envio.corpo?.uuid) {
+      erroEnvio = textoCurto(envio.corpo?.message ?? envio.corpo?.description ?? erroDeFonte(envio), 160);
+    } else if (envio.executada && !ler(nova, true)) {
+      erroEnvio = nova.status === 404 ? 'a análise não terminou a tempo (veja depois no link)' : erroDeFonte(nova);
+      analise = ler(anterior, false);
+    }
+    fontes.urlscan = {
+      historico,
+      analise,
+      erroEnvio,
+      linkPendente: envio.corpo?.uuid && !analise?.propria ? `https://urlscan.io/result/${encodeURIComponent(envio.corpo.uuid)}/` : '',
+    };
+    registra('urlscan.io', Boolean(analise) || busca.ok, erroEnvio || erroDeFonte(busca));
+    if (erroEnvio) falharam.push(`urlscan.io (análise nova): ${erroEnvio}`);
+
+    if (analise) {
+      const quando = analise.propria ? 'na análise feita agora' : `na análise de ${analise.data}`;
+      const diasAtras = analise.data ? Math.floor((agora - Date.parse(analise.data)) / 86400000) : 999;
+      const recente = analise.propria || diasAtras <= 30;
+      if (analise.malicioso) {
+        sinal('urlscan.io', recente ? 'malicioso' : 'suspeito', recente ? 45 : 15, `O urlscan.io classificou a página como maliciosa ${quando}${analise.categorias.length ? ` (${analise.categorias.join(', ')})` : ''}.`);
+      }
+      const dominioMarca = (m) => String(m).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const imitada = analise.marcas.filter((m) => dominioMarca(m) && !String(a.dominio).replace(/[^a-z0-9]/g, '').includes(dominioMarca(m)));
+      if (imitada.length) sinal('urlscan.io', 'suspeito', 20, `A página parece imitar a marca ${imitada.join(', ')} ${quando}, mas o domínio é ${a.dominio}.`);
+      if (analise.dominioFinal && analise.dominioFinal !== a.host && !analise.dominioFinal.endsWith(`.${a.dominio}`) && analise.dominioFinal !== a.dominio) {
+        sinal('urlscan.io', 'info', 5, `No navegador do urlscan a página terminou em outro domínio: ${analise.dominioFinal} (redirecionamento por JavaScript?).`);
+      }
+    }
+  } else if (busca.executada) registra('urlscan.io', false, erroDeFonte(busca));
+}
+
 // ---------------- Postura (só se o site foi visitado) ----------------
 if (a.visitado) {
   const PESO_NOTA = { 'A+': 0, A: 0, 'A-': 0, 'B+': 3, B: 3, 'B-': 3, 'C+': 6, C: 6, 'C-': 6, D: 10, F: 12 };
@@ -293,7 +379,7 @@ if (a.visitado) {
 if (a.avisoDns) sinal('DNS', 'info', 0, a.avisoDns);
 
 // ---------------- Veredito e nota automáticos ----------------
-const REPUTACAO = ['VirusTotal (domínio)', 'VirusTotal (URL)', 'URLhaus', 'ThreatFox', 'OTX', 'AbuseIPDB'];
+const REPUTACAO = ['VirusTotal (domínio)', 'VirusTotal (URL)', 'URLhaus', 'ThreatFox', 'OTX', 'AbuseIPDB', 'urlscan.io'];
 const fontesReputacao = consultadas.filter((f) => REPUTACAO.includes(f)).length;
 let veredito;
 if (sinais.some((s) => s.nivel === 'malicioso')) veredito = 'malicioso';
