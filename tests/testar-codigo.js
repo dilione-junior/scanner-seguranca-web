@@ -124,12 +124,47 @@ teste('corta o conteúdo no limite e remove base64', () => {
   assert.strictEqual(r.cabecalhos['content-type'], 'text/html');
 });
 
+// ---------------------------------------------------------------- Biblioteca de domínio
+console.log('Domínio e IOCs');
+const libDominio = (expr) => new Function(`${ler('lib/dominio.js')}\nreturn ${expr};`)();
+for (const [host, esperado] of [['www.loja.exemplo.com.br', 'exemplo.com.br'], ['a.b.exemplo.com', 'exemplo.com'], ['exemplo.com', 'exemplo.com'], ['www.bbc.co.uk', 'bbc.co.uk'], ['sub.exemplo.io', 'exemplo.io']]) {
+  teste(`domínio registrado de ${host} é ${esperado}`, () => assert.strictEqual(libDominio(`dominioRegistravel(${JSON.stringify(host)})`), esperado));
+}
+teste('ID de URL do VirusTotal (base64url sem =)', () => {
+  assert.strictEqual(libDominio("base64Url('https://github.com/')"), 'aHR0cHM6Ly9naXRodWIuY29tLw');
+  assert.strictEqual(libDominio("base64Url('https://github.com/zzz-nao-existe-123456')"), 'aHR0cHM6Ly9naXRodWIuY29tL3p6ei1uYW8tZXhpc3RlLTEyMzQ1Ng');
+});
+teste('IOC desarmado', () => {
+  assert.strictEqual(libDominio("desarmar('https://mal.exemplo.com/a.b?x=1.2')"), 'hxxps://mal[.]exemplo[.]com/a.b?x=1.2');
+  assert.strictEqual(libDominio("desarmar('http://1.2.3.4/')"), 'hxxp://1[.]2[.]3[.]4/');
+  assert.strictEqual(libDominio("desarmar('mal.com')"), 'mal[.]com');
+});
+
+// ---------------------------------------------------------------- Modo só reputação
+console.log('Modo só reputação');
+const dnsReputacao = (ipv4, status = 0) => executar('verificar-dns.js', ['ip.js'], { Status: 0 },
+  { 'Validar URL': alvo, 'Configuração': { modo: 'reputacao' }, 'DNS (IPv4)': { Status: status, Answer: ipv4.map((data) => ({ type: 1, data })) } });
+teste('domínio derrubado (NXDOMAIN) ainda é consultado', () => {
+  const r = dnsReputacao([], 3);
+  assert.strictEqual(r.ok, true);
+  assert.match(r.avisoDns, /não existe/);
+});
+teste('IP interno é descartado, mas a consulta segue', () => {
+  const r = dnsReputacao(['127.0.0.1', '8.8.8.8']);
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(r.ips, ['8.8.8.8']);
+});
+teste('modo completo continua recusando IP interno', () => assert.strictEqual(executar('verificar-dns.js', ['ip.js'], { Status: 0 },
+  { 'Validar URL': alvo, 'Configuração': { modo: 'completa' }, 'DNS (IPv4)': { Status: 0, Answer: [{ type: 1, data: '10.0.0.1' }] } }).ok, false));
+
 // ---------------------------------------------------------------- Processar resultados
 console.log('Processar resultados');
-const processar = (cabecalhos, urlFinal = 'https://exemplo.com.br/', ia = {}) => executar('processar-resultados.js', [], {}, {
-  'Tratar resposta': { urlOriginal: urlFinal, urlFinal, host: 'exemplo.com.br', ips: ['8.8.8.8'], status: 200, cabecalhos, cadeia: [] },
-  'IA - configuração': ia.config ?? { output: 'ok' },
-  'IA - conteúdo': ia.conteudo ?? { output: 'ok' },
+const pagina = (cabecalhos, urlFinal = 'https://exemplo.com.br/', extra = {}) => ({
+  urlOriginal: urlFinal, urlFinal, host: 'exemplo.com.br', ips: ['8.8.8.8'], status: 200, cabecalhos, cadeia: [], visitado: true, ...extra,
+});
+const preparar = (pag) => executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pag, { 'Configuração': { modo: 'completa', contexto: '' } });
+const processar = (cabecalhos, urlFinal, extra) => executar('processar-resultados.js', [], {}, {
+  'Preparar consultas': preparar(pagina(cabecalhos, urlFinal, extra)),
 }).auditoria;
 
 const completo = {
@@ -155,37 +190,165 @@ teste('cookie sem Secure/HttpOnly/SameSite gera achado', () => {
   assert.match(cookies[0].titulo, /sessao.*Secure, HttpOnly, SameSite/);
 });
 teste('Server com versão gera achado de vazamento', () => assert.ok(processar({ ...completo, server: 'nginx/1.18.0' }).achados.some((a) => a.titulo.includes('server'))));
-teste('falha da IA vira aviso, não erro', () => {
-  const r = processar(completo, undefined, { config: { error: 'API key not valid' } });
-  assert.strictEqual(r.iaConfiguracao.ok, false);
-  assert.match(r.iaConfiguracao.texto, /API key not valid/);
+teste('só reputação: postura N/A e sem achados', () => {
+  const r = processar({}, 'http://exemplo.com.br/', { visitado: false });
+  assert.strictEqual(r.nota, 'N/A');
+  assert.strictEqual(r.achados.length, 0);
 });
+teste('preparar consultas acha domínio, IP e hosts da cadeia', () => {
+  const r = preparar(pagina({}, 'https://www.loja.exemplo.com.br/', { host: 'www.loja.exemplo.com.br', ips: ['2001:db8::1', '8.8.8.8'], cadeia: [{ url: 'https://bit.ly/abc' }, { url: 'https://www.loja.exemplo.com.br/' }] }));
+  assert.strictEqual(r.dominio, 'exemplo.com.br');
+  assert.strictEqual(r.ipPrincipal, '8.8.8.8');
+  assert.deepStrictEqual(r.hostsCadeia, ['bit.ly']);
+  assert.strictEqual(r.vtEntidade, 'domains/exemplo.com.br');
+  assert.strictEqual(r.observatorio, true);
+});
+
+// ---------------------------------------------------------------- Consolidar inteligência
+console.log('Consolidar inteligência');
+const ok = (body, statusCode = 200) => ({ statusCode, body });
+const vtStats = (malicious, extra = {}) => ok({ data: { attributes: { last_analysis_stats: { malicious, suspicious: 0, harmless: 60, undetected: 30 }, reputation: 0, ...extra } } });
+const limpoBase = {
+  'VirusTotal (URL)': vtStats(0),
+  'VirusTotal (domínio)': vtStats(0, { creation_date: 946684800 }),
+  'URLhaus': ok({ query_status: 'no_results' }),
+  'ThreatFox': ok({ query_status: 'no_result', data: 'Your search did not yield any results' }),
+  'OTX': ok({ pulse_info: { count: 0 }, validation: [] }),
+  'AbuseIPDB': ok({ data: { abuseConfidenceScore: 0, totalReports: 0, usageType: 'Data Center', isp: 'Exemplo', countryCode: 'BR' } }),
+  'Shodan InternetDB': ok({ ports: [80, 443], vulns: [], tags: [] }),
+  'RDAP (registro do domínio)': ok({ events: [{ eventAction: 'registration', eventDate: '2000-01-01T00:00:00Z' }] }),
+  'DNS (SPF)': ok({ Answer: [{ type: 16, data: 'v=spf1 -all' }] }),
+  'DNS (DMARC)': ok({ Answer: [{ type: 16, data: 'v=DMARC1; p=reject' }] }),
+  'Mozilla Observatory': ok({ grade: 'A', score: 90, tests_failed: 1, tests_quantity: 10 }),
+};
+const consolidar = (respostas = {}, cabecalhos = completo, urlFinal = 'https://exemplo.com.br/', extra = {}) => {
+  const prep = preparar(pagina(cabecalhos, urlFinal, extra));
+  const aud = executar('processar-resultados.js', [], {}, { 'Preparar consultas': prep });
+  return executar('consolidar-inteligencia.js', ['dominio.js'], aud, { ...limpoBase, ...respostas, 'Preparar consultas': prep }).auditoria;
+};
+teste('site limpo e bem configurado: limpo e nota alta', () => {
+  const r = consolidar().inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'limpo');
+  assert.ok(r.notaAutomatica >= 90, `nota ${r.notaAutomatica}`);
+  assert.strictEqual(r.falharam.length, 0, r.falharam.join('; '));
+});
+teste('URL exata no URLhaus (online): malicioso e nota até 20', () => {
+  const r = consolidar({ 'URLhaus': ok({ query_status: 'ok', url_count: '1', blacklists: { spamhaus_dbl: 'not listed' }, urls: [{ url: 'https://exemplo.com.br/', url_status: 'online', threat: 'malware_download', tags: ['GuLoader'] }] }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+  assert.ok(r.notaAutomatica <= 20);
+});
+teste('plataforma popular com URLs de terceiros no URLhaus/ThreatFox NÃO vira malicioso', () => {
+  const r = consolidar({
+    'VirusTotal (domínio)': vtStats(0, { popularity_ranks: { Majestic: { rank: 30 } } }),
+    'URLhaus': ok({ query_status: 'ok', url_count: '61789', blacklists: { spamhaus_dbl: 'not listed' }, urls: [{ url: 'https://exemplo.com.br/usuario/arquivo.exe', url_status: 'online', threat: 'malware_download' }] }),
+    'ThreatFox': ok({ query_status: 'ok', data: [{ ioc: 'https://exemplo.com.br/usuario/x.zip', malware_printable: 'X', threat_type: 'payload_delivery', confidence_level: 100 }] }),
+  }).inteligencia;
+  assert.strictEqual(r.popular, true);
+  assert.strictEqual(r.vereditoAutomatico, 'limpo');
+});
+teste('mesmo caso sem popularidade vira malicioso (malware online no host)', () => {
+  const r = consolidar({
+    'URLhaus': ok({ query_status: 'ok', url_count: '2', blacklists: { spamhaus_dbl: 'not listed' }, urls: [{ url: 'https://exemplo.com.br/x.exe', url_status: 'online', threat: 'malware_download' }] }),
+  }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+});
+teste('1 motor isolado no VirusTotal não condena', () => assert.strictEqual(consolidar({ 'VirusTotal (domínio)': vtStats(1, { creation_date: 946684800 }) }).inteligencia.vereditoAutomatico, 'limpo'));
+teste('ThreatFox com o host exato: malicioso', () => {
+  const r = consolidar({ 'ThreatFox': ok({ query_status: 'ok', data: [{ ioc: 'exemplo.com.br:443', malware_printable: 'Cobalt Strike', threat_type: 'botnet_cc', confidence_level: 100 }] }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+});
+teste('domínio com 5 dias: suspeito', () => {
+  const recente = new Date(Date.now() - 5 * 86400000).toISOString();
+  const r = consolidar({ 'RDAP (registro do domínio)': ok({ events: [{ eventAction: 'registration', eventDate: recente }] }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'suspeito');
+  assert.strictEqual(r.fontes.registro.idadeDias, 5);
+});
+teste('todas as fontes fora: indeterminado, sem travar', () => {
+  const fora = Object.fromEntries(Object.keys(limpoBase).map((k) => [k, { error: { message: 'getaddrinfo ENOTFOUND' } }]));
+  const r = consolidar(fora).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'indeterminado');
+  assert.ok(r.falharam.length >= 6);
+});
+teste('cota esgotada do VirusTotal é explicada', () => assert.ok(consolidar({ 'VirusTotal (URL)': ok({ error: { code: 'QuotaExceededError' } }, 429) }).inteligencia.falharam.some((x) => /cota/.test(x))));
+teste('sem SPF e DMARC gera sinais', () => {
+  const r = consolidar({ 'DNS (SPF)': ok({ Status: 0 }), 'DNS (DMARC)': ok({ Status: 3 }) }).inteligencia;
+  assert.ok(r.sinais.some((s) => /SPF/.test(s.texto)) && r.sinais.some((s) => /DMARC/.test(s.texto)));
+});
+
+// ---------------------------------------------------------------- Parecer final (travas da IA)
+console.log('Parecer final');
+const parecer = (aud, saidaIA) => {
+  const dossie = executar('montar-dossie.js', ['dominio.js'], {}, { 'Consolidar inteligência': { auditoria: aud }, 'IA - conteúdo': { output: 'nada' } });
+  return executar('parecer-final.js', ['dominio.js'], saidaIA, { 'Consolidar inteligência': { auditoria: aud }, 'Montar dossiê': dossie }).auditoria;
+};
+const respostaIA = (obj) => ({ output: '```json\n' + JSON.stringify(obj) + '\n```' });
+const audLimpo = consolidar();
+const audMalicioso = consolidar({ 'ThreatFox': ok({ query_status: 'ok', data: [{ ioc: 'exemplo.com.br', malware_printable: 'X', threat_type: 'botnet_cc', confidence_level: 90 }] }) });
+teste('dossiê não leva o HTML cru para a IA analista', () => {
+  const d = executar('montar-dossie.js', ['dominio.js'], {}, { 'Consolidar inteligência': { auditoria: { ...audLimpo, conteudo: '<html>SEGREDO-DO-HTML</html>' } } });
+  assert.ok(!d.dossie.includes('SEGREDO-DO-HTML'));
+  assert.match(d.dossie, /Veredito automático: limpo/);
+});
+teste('parecer da IA válido é usado (JSON dentro de ```)', () => {
+  const r = parecer(audLimpo, respostaIA({ veredito: 'limpo', nota: 88, confianca: 'alta', resumo: 'ok', evidencias: ['a'], acoes: ['liberar'] })).parecer;
+  assert.strictEqual(r.origem, 'ia');
+  assert.strictEqual(r.nota, 88);
+  assert.deepStrictEqual(r.acoes, ['liberar']);
+});
+teste('IA não consegue desmentir evidência forte', () => {
+  const r = parecer(audMalicioso, respostaIA({ veredito: 'limpo', nota: 100, confianca: 'alta', resumo: 'site seguro' })).parecer;
+  assert.strictEqual(r.veredito, 'malicioso');
+  assert.ok(r.nota <= 30);
+  assert.ok(r.avisos.length >= 1);
+});
+teste('nota da IA fica a até 30 pontos da automática', () => {
+  const r = parecer(audLimpo, respostaIA({ veredito: 'limpo', nota: 5, confianca: 'baixa', resumo: 'x' })).parecer;
+  assert.strictEqual(r.nota, audLimpo.inteligencia.notaAutomatica - 30);
+});
+teste('IA fora do formato: vale o parecer automático', () => {
+  const r = parecer(audMalicioso, { output: 'Desculpe, não consigo.' }).parecer;
+  assert.strictEqual(r.origem, 'automatica');
+  assert.strictEqual(r.veredito, 'malicioso');
+  assert.ok(r.acoes.length > 0);
+});
+teste('IA com erro de API: vale o parecer automático', () => assert.match(parecer(audLimpo, { error: 'API key not valid' }).parecer.resumo, /API key not valid/));
 
 // ---------------------------------------------------------------- Gerar relatório (segurança do HTML)
 console.log('Gerar relatório');
 const malicioso = '<script>alert(1)</script><img src=x onerror=alert(2)>';
-const auditoria = processar(
-  { ...completo, server: malicioso, 'x-teste': '"><svg onload=alert(3)>', 'set-cookie': [`${malicioso}=1`] },
-  'https://exemplo.com.br/',
-  { config: { output: `## Título ${malicioso}\n- item **negrito** \`<b>código</b>\`\n\`\`\`\n${malicioso}\n\`\`\`` }, conteudo: { output: malicioso } },
-);
-auditoria.urlOriginal = 'javascript:alert(4)';
-const relatorio = executar('gerar-relatorio.js', ['html.js'], { auditoria });
+const audRelatorio = consolidar({
+  'VirusTotal (domínio)': vtStats(2, { categories: { x: malicioso }, last_analysis_results: { M: { category: 'malicious', result: malicioso } } }),
+  'Shodan InternetDB': ok({ ports: [3389], vulns: [malicioso], tags: [malicioso] }),
+}, { ...completo, server: malicioso, 'x-teste': '"><svg onload=alert(3)>', 'set-cookie': [`${malicioso}=1`] });
+audRelatorio.urlOriginal = 'javascript:alert(4)';
+const final = parecer(audRelatorio, respostaIA({ veredito: 'suspeito', nota: 50, confianca: 'media', resumo: malicioso, evidencias: [malicioso], acoes: [malicioso], mitre: [malicioso] }));
+final.iaConteudo = { ok: true, texto: `## Título ${malicioso}\n- item **negrito** \`<b>código</b>\`\n\`\`\`\n${malicioso}\n\`\`\`` };
+const relatorio = executar('gerar-relatorio.js', ['html.js', 'dominio.js'], { auditoria: final });
 
-teste('nenhuma tag vinda do site ou da IA aparece crua', () => {
-  assert.ok(!/<script|<img|<svg|onerror=|onload=/i.test(relatorio.html.replace(/&lt;[^]*?&gt;/g, '')), 'encontrou HTML não escapado');
+teste('nenhuma tag vinda do site, das fontes ou da IA aparece crua', () => {
+  assert.ok(!/<script|<img|<svg|<[^>]*\son(error|load)=/i.test(relatorio.html), 'encontrou HTML não escapado');
   assert.ok(!relatorio.html.includes('<script'));
   assert.ok(!relatorio.html.includes('<svg'));
   assert.ok(!relatorio.html.includes('<img'));
   assert.ok(!relatorio.html.includes('<b>código'));
 });
 teste('link javascript: não vira link', () => assert.ok(!relatorio.html.includes('href="javascript:')));
+teste('endereço do alvo não vira link clicável (sai desarmado)', () => {
+  assert.ok(!relatorio.html.includes('href="https://exemplo.com.br'));
+  assert.ok(relatorio.textoChamado.includes('exemplo[.]com[.]br'));
+});
 teste('Markdown da IA é formatado', () => {
   assert.ok(relatorio.html.includes('<strong>negrito</strong>'));
   assert.ok(relatorio.html.includes('<h3'));
   assert.ok(relatorio.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 });
-teste('assunto do e-mail tem host e nota', () => assert.match(relatorio.assunto, /exemplo\.com\.br \(nota [A-F][+-]?\)/));
+teste('assunto do e-mail tem veredito, host e nota', () => assert.match(relatorio.assunto, /^\[SUSPEITO\] exemplo\.com\.br: nota \d+\/100/));
+teste('relatório do modo só reputação sai sem postura', () => {
+  const aud = consolidar({}, {}, 'https://exemplo.com.br/', { visitado: false });
+  const r = executar('gerar-relatorio.js', ['html.js', 'dominio.js'], { auditoria: parecer(aud, { error: 'sem IA' }) });
+  assert.match(r.html, /Não avaliada/);
+  assert.ok(!r.html.includes('Cabeçalhos recebidos'));
+});
 
 // ---------------------------------------------------------------- Página de erro
 console.log('Página de erro');
