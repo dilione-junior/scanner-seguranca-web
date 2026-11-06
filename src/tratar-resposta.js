@@ -61,5 +61,8 @@ return [{
     tamanhoConteudo,
     cadeia,
     parouNoLimite: Boolean(ehRedirecionamento),
+    visitado: true,
+    dnssec: Boolean(alvo.dnssec),
+    avisoDns: alvo.avisoDns ?? '',
   },
 }];

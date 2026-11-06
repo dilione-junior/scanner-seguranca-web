@@ -1,20 +1,10 @@
-// Nó "Processar resultados": calcula a nota e os achados automáticos A PARTIR DOS CABEÇALHOS REAIS.
-// A nota não depende da IA (a IA pode errar ou inventar); o texto da IA entra só como análise complementar.
-const dados = $('Tratar resposta').last().json;
+// Nó "Processar resultados": postura de segurança calculada A PARTIR DOS CABEÇALHOS REAIS (nota A+ a F).
+// Não depende da IA (a IA pode errar ou inventar). No modo "só reputação" o site não foi visitado
+// e não há cabeçalhos: a postura fica "N/A".
+const dados = $('Preparar consultas').first().json;
 const cab = dados.cabecalhos ?? {};
+const visitado = dados.visitado !== false;
 const ehHttps = String(dados.urlFinal).startsWith('https://');
-
-function textoDaIA(nomeDoNo) {
-  let json;
-  try {
-    json = $(nomeDoNo).last().json;
-  } catch (erro) {
-    return { ok: false, texto: 'A análise da IA não foi executada.' };
-  }
-  if (typeof json.output === 'string' && json.output.trim()) return { ok: true, texto: json.output.trim() };
-  const erro = json.error?.message ?? json.error ?? 'resposta vazia';
-  return { ok: false, texto: `A análise da IA não está disponível (${erro}). Confira a credencial do Google Gemini no n8n.` };
-}
 
 function valor(nome) {
   const v = cab[nome];
@@ -175,6 +165,11 @@ else nota = 'F';
 const ORDEM = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'];
 if (!ehHttps && ORDEM.indexOf(nota) < ORDEM.indexOf('D')) nota = 'D';
 
+if (!visitado) {
+  nota = 'N/A';
+  achados.length = 0;
+}
+
 const ordemNivel = { alto: 0, medio: 1, baixo: 2, info: 3 };
 achados.sort((a, b) => ordemNivel[a.nivel] - ordemNivel[b.nivel]);
 
@@ -200,8 +195,15 @@ return [{
       achados,
       statusCabecalhos: status,
       cabecalhos: cab,
-      iaConfiguracao: textoDaIA('IA - configuração'),
-      iaConteudo: textoDaIA('IA - conteúdo'),
+      visitado,
+      modo: dados.modo,
+      contexto: dados.contexto,
+      ehIP: dados.ehIP,
+      dominio: dados.dominio,
+      ipPrincipal: dados.ipPrincipal,
+      hostsCadeia: dados.hostsCadeia,
+      dnssec: dados.dnssec,
+      avisoDns: dados.avisoDns,
     },
   },
 }];
