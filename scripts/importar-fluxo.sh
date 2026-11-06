@@ -2,17 +2,28 @@
 # Importa e publica o fluxo no n8n que roda em Docker.
 # Atenção: substitui a versão do fluxo que estiver no n8n com o mesmo id (scannerSegWeb001).
 # Se alterou o fluxo pela tela do n8n, exporte-o antes ou as mudanças serão perdidas.
+# As credenciais já criadas no n8n (mesmo pela tela) são reaproveitadas automaticamente.
 #
 # Uso:  bash scripts/importar-fluxo.sh [nome-do-container]   (padrão: ng-soc-automacao-n8n-1)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export MSYS_NO_PATHCONV=1   # Git Bash no Windows: não converter caminhos como /tmp
+export PYTHONIOENCODING=utf-8
 
 n8n="${1:-ng-soc-automacao-n8n-1}"
 id=scannerSegWeb001
+tmp=$(mktemp -d -p . .importacao.XXXXXX)   # relativo: funciona no Python do Windows e no docker cp
+trap 'rm -rf "$tmp"' EXIT
 
 python scripts/gerar-fluxo.py
-docker cp workflow/scanner-seguranca-web.json "$n8n":/tmp/scanner.json
+
+# Lista as credenciais existentes (o arquivo exportado só tem dados criptografados; usamos id, nome e tipo).
+docker exec "$n8n" sh -c 'umask 077; n8n export:credentials --all --output=/tmp/cred-lista.json >/dev/null 2>&1; cat /tmp/cred-lista.json; rm -f /tmp/cred-lista.json' \
+    | python -c "import json,sys; print(json.dumps([{k: c[k] for k in ('id','name','type')} for c in json.load(sys.stdin)]))" > "$tmp/credenciais.json"
+echo "Credenciais:"
+python scripts/ajustar-credenciais.py workflow/scanner-seguranca-web.json "$tmp/credenciais.json" > "$tmp/fluxo.json"
+
+docker cp "$tmp/fluxo.json" "$n8n":/tmp/scanner.json
 docker exec "$n8n" n8n import:workflow --input=/tmp/scanner.json
 docker exec -u root "$n8n" rm -f /tmp/scanner.json
 docker exec "$n8n" n8n publish:workflow --id="$id"

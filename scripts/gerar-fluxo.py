@@ -15,8 +15,8 @@ SAIDA = RAIZ / "workflow" / "scanner-seguranca-web.json"
 
 ID_FLUXO = "scannerSegWeb001"
 CRED_GEMINI = {"googlePalmApi": {"id": "scanGeminiApi001", "name": "Google Gemini (scanner)"}}
-CRED_GMAIL = {"gmailOAuth2": {"id": "scanGmailOAuth01", "name": "Gmail (scanner)"}}
-MODELO_GEMINI = "models/gemini-2.5-flash"
+CRED_OUTLOOK = {"microsoftOutlookOAuth2Api": {"id": "scanOutlookOAuth1", "name": "Outlook (scanner)"}}
+MODELO_GEMINI = "models/gemini-flash-latest"  # apelido do Google: sempre o Flash atual (o 2.5 foi aposentado para contas novas)
 
 
 def ler(nome):
@@ -227,13 +227,15 @@ no("Enviar e-mail?", "n8n-nodes-base.if", 2.2, [2120, 200], {
     "looseTypeValidation": True,
     "options": {},
 })
-no("Enviar por Gmail", "n8n-nodes-base.gmail", 2.1, [2340, 80], {
-    "sendTo": "={{ $('Configuração').first().json.emailDestino }}",
+no("Enviar por Outlook", "n8n-nodes-base.microsoftOutlook", 2, [2340, 80], {
+    "authentication": "microsoftOutlookOAuth2Api",
+    "resource": "message",
+    "operation": "send",
+    "toRecipients": "={{ $('Configuração').first().json.emailDestino }}",
     "subject": "={{ $('Gerar relatório').first().json.assunto }}",
-    "emailType": "html",
-    "message": "={{ $('Gerar relatório').first().json.html }}",
-    "options": {"appendAttribution": False},
-}, credentials=CRED_GMAIL, onError="continueRegularOutput", webhookId="5d0f6c1e-8a2b-4c3d-9e4f-5a6b7c8d9e02")
+    "bodyContent": "={{ $('Gerar relatório').first().json.html }}",
+    "additionalFields": {"bodyContentType": "html"},
+}, credentials=CRED_OUTLOOK, onError="continueRegularOutput")
 resposta_html("Mostrar na tela", [2560, 200], "={{ $('Gerar relatório').first().json.html }}")
 
 # ---------------- Erros ----------------
@@ -247,9 +249,9 @@ def nota(nome, posicao, largura, altura, cor, texto):
 
 
 nota("Nota - Como configurar", [-1420, -120], 520, 460, 4, """## Como configurar
-1. **Gemini:** em *Credentials*, abra **Google Gemini (scanner)** e cole a chave criada em https://aistudio.google.com/apikey (ou rode `scripts/importar-credenciais.sh`).
-2. **Gmail (opcional):** abra **Gmail (scanner)**, informe Client ID/Secret do Google Cloud e clique em *Connect*. Depois, no nó **Configuração**, mude `enviarEmail` para `true` e preencha `emailDestino`.
-3. **Publique** o fluxo e abra o formulário:
+1. **Gemini:** crie uma credencial *Google Gemini (PaLM) API* com a chave de https://aistudio.google.com/apikey (ou rode `scripts/importar-credenciais.sh`).
+2. **Outlook (opcional):** crie uma credencial *Microsoft Outlook OAuth2 API* com o app do Entra ID (veja o README), escopo só `openid offline_access Mail.Send`, e clique em *Connect*. Depois, no nó **Configuração**, mude `enviarEmail` para `true` e preencha `emailDestino`.
+3. **Publique** o fluxo (salvar não publica) e abra o formulário:
    http://127.0.0.1:5678/form/scanner-seguranca-web
 
 Sem a chave do Gemini o relatório sai assim mesmo, com a nota e os achados automáticos; só falta a parte da IA.""")
@@ -271,7 +273,7 @@ nota("Nota - Relatório", [1640, -160], 560, 300, 6, """## Relatório
 - **Nota de A+ a F** calculada pelos cabeçalhos reais (não pela IA).
 - Achados por nível: alto, médio, baixo, info.
 - Todo texto do site e da IA é **escapado** antes de virar HTML: um site malicioso não consegue injetar conteúdo no relatório.
-- Enviado pelo Gmail (se ligado) e depois mostrado na tela.""")
+- Enviado pelo Outlook (se ligado) e depois mostrado na tela.""")
 
 # ---------------- Ligações ----------------
 def liga(origem, destinos, saida=0, tipo="main"):
@@ -298,9 +300,9 @@ ligacoes = [
     liga("Seguir redirecionamento?", ["IA - configuração", "IA - conteúdo"], 1),
     liga("Processar resultados", ["Gerar relatório"]),
     liga("Gerar relatório", ["Enviar e-mail?"]),
-    liga("Enviar e-mail?", ["Enviar por Gmail"], 0),
+    liga("Enviar e-mail?", ["Enviar por Outlook"], 0),
     liga("Enviar e-mail?", ["Mostrar na tela"], 1),
-    liga("Enviar por Gmail", ["Mostrar na tela"]),
+    liga("Enviar por Outlook", ["Mostrar na tela"]),
     liga("Página de erro", ["Mostrar erro"]),
 ]
 

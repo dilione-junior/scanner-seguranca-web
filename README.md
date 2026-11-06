@@ -1,6 +1,6 @@
 # Scanner de Segurança Web
 
-Fluxo do **n8n** que analisa a segurança de um site a partir de um formulário. Você informa o endereço e recebe na tela, e opcionalmente por Gmail, um relatório com **nota de A+ a F**, os problemas encontrados e como corrigir cada um.
+Fluxo do **n8n** que analisa a segurança de um site a partir de um formulário. Você informa o endereço e recebe na tela, e opcionalmente por e-mail (Outlook), um relatório com **nota de A+ a F**, os problemas encontrados e como corrigir cada um.
 
 A análise é **passiva**: o scanner lê a página uma única vez, como um navegador. Ele não testa ataques, não faz força bruta e não varre portas.
 
@@ -35,7 +35,7 @@ flowchart LR
     IA2 --> J
     J --> P[Processar resultados<br/>nota e achados] --> R[Gerar relatório]
     R --> G{Enviar e-mail?}
-    G -->|sim| GM[Gmail] --> TELA[Mostrar na tela]
+    G -->|sim| GM[Outlook] --> TELA[Mostrar na tela]
     G -->|não| TELA
 ```
 
@@ -59,8 +59,8 @@ Limitações conhecidas: entre a checagem de DNS e o acesso existe uma janela pe
 ## Requisitos
 
 - **n8n 2.x** (testado no 2.46.4), por exemplo em Docker.
-- Chave gratuita do **Google Gemini**: https://aistudio.google.com/apikey (modelo `gemini-2.5-flash`).
-- *(Opcional)* Conta Google com **Gmail OAuth2** configurado, para receber o relatório por e-mail.
+- Chave gratuita do **Google Gemini**: https://aistudio.google.com/apikey (modelo `gemini-flash-latest`, apelido do Google para o Flash mais recente).
+- *(Opcional)* Conta Microsoft (Outlook/Hotmail pessoal ou corporativa) e um app registrado no **Entra ID**, para enviar o relatório por e-mail.
 - Para desenvolver: Python 3 (gerador do fluxo) e Node.js (testes).
 
 ## Instalação
@@ -78,7 +78,7 @@ bash scripts/importar-fluxo.sh                  # container padrão: ng-soc-auto
 bash scripts/importar-fluxo.sh nome-do-container
 ```
 
-O script gera o JSON, importa, publica e reinicia o n8n. Ele **substitui** a versão do fluxo que estiver no n8n com o mesmo id (`scannerSegWeb001`).
+O script gera o JSON, importa, publica e reinicia o n8n. As credenciais que já existem no n8n, mesmo criadas pela tela, são ligadas aos nós pelo tipo. Ele **substitui** a versão do fluxo que estiver no n8n com o mesmo id (`scannerSegWeb001`).
 
 ## Credenciais
 
@@ -93,11 +93,17 @@ Escolha uma das formas:
   ```
   O `.env` fica fora do Git (`.gitignore`) e a chave nunca é impressa.
 
-### Gmail (opcional)
+### Outlook (opcional)
 
-1. No Google Cloud Console, crie um *OAuth Client ID* (tipo Web) com o redirect mostrado pelo n8n e ative a Gmail API.
-2. No n8n, abra a credencial **Gmail (scanner)**, informe Client ID e Secret e clique em **Connect**.
-3. No nó **Configuração**, mude `enviarEmail` para `true` e preencha `emailDestino`.
+1. Em https://entra.microsoft.com, abra **Registros de aplicativo > Novo registro**:
+   - **Tipos de conta:** *Qualquer locatário do Entra ID + contas pessoais da Microsoft*;
+   - **URI de redirecionamento:** plataforma **Web**, com o endereço que o n8n mostra em *OAuth Redirect URL* (ex.: `http://localhost:5678/rest/oauth2-credential/callback`).
+2. Em **Certificados e segredos**, crie um segredo do cliente e copie o **Valor**, que só aparece uma vez.
+3. Em **Permissões de API > Microsoft Graph > Permissões delegadas**, adicione só **`Mail.Send`**.
+4. No n8n, crie a credencial **Microsoft Outlook OAuth2 API** com o *ID do aplicativo (cliente)* e o segredo. Ligue **Custom Scopes** com `openid offline_access Mail.Send` e clique em **Connect my account**.
+5. No nó **Configuração**, mude `enviarEmail` para `true` e preencha `emailDestino`.
+
+> O n8n monta o *OAuth Redirect URL* a partir de `N8N_WEBHOOK_URL`. Se aparecer um nome interno do Docker (ex.: `http://n8n:5678/`), a Microsoft recusa o endereço. Nesse caso, use `N8N_WEBHOOK_URL=http://localhost:5678/`.
 
 O e-mail vai sempre para o endereço fixo da configuração. Assim o formulário não pode ser usado para mandar e-mail a terceiros.
 
@@ -115,7 +121,7 @@ Outros ajustes no nó **Configuração**:
 
 | Campo | Padrão | Para que serve |
 |---|---|---|
-| `enviarEmail` | `false` | Envia também por Gmail |
+| `enviarEmail` | `false` | Envia também por Outlook |
 | `emailDestino` | vazio | Quem recebe o relatório |
 | `limiteConteudo` | `60000` | Quantos caracteres do HTML vão para a IA |
 
@@ -154,7 +160,7 @@ scanner-seguranca-web/
 │   ├── lib/html.js          escape de HTML e Markdown seguro
 │   ├── validar-url.js       verificar-dns.js   tratar-resposta.js
 │   └── processar-resultados.js   gerar-relatorio.js   pagina-erro.js
-├── scripts/                 gerar-fluxo.py, importar-fluxo.sh, importar-credenciais.sh
+├── scripts/                 gerar-fluxo.py, importar-fluxo.sh, ajustar-credenciais.py, importar-credenciais.sh
 ├── tests/testar-codigo.js
 ├── workflow/scanner-seguranca-web.json   (gerado; é este que se importa no n8n)
 └── docs/exemplo-relatorio.png
@@ -166,7 +172,7 @@ Analise apenas **sites seus ou que você tem autorização para avaliar**. Mesmo
 
 ## Créditos
 
-Baseado no modelo *Website Security Scanner* da comunidade n8n, reescrito em português. Mudanças em relação ao original: proteção contra SSRF, escape do relatório, Google Gemini no lugar da OpenAI, nota calculada pelos cabeçalhos reais, relatório na tela e testes automatizados.
+Baseado no modelo *Website Security Scanner* da comunidade n8n, reescrito em português. Mudanças em relação ao original: proteção contra SSRF, escape do relatório, Google Gemini no lugar da OpenAI, Outlook no lugar do Gmail, nota calculada pelos cabeçalhos reais, relatório na tela e testes automatizados.
 
 ## Licença
 

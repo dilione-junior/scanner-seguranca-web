@@ -1,5 +1,5 @@
 // Nó "Gerar relatório": monta o relatório em HTML (o mesmo para a tela e para o e-mail).
-// Só usa estilos inline, que funcionam no Gmail e dentro da página do formulário.
+// Só usa estilos inline, que funcionam no Outlook e dentro da página do formulário.
 const a = $input.first().json.auditoria;
 
 const CORES_NOTA = { 'A+': '#15803d', A: '#15803d', 'A-': '#15803d', 'B+': '#1d4ed8', B: '#1d4ed8', 'B-': '#1d4ed8', 'C+': '#b45309', C: '#b45309', 'C-': '#b45309', D: '#b91c1c', F: '#b91c1c' };

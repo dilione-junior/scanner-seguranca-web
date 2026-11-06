@@ -5,7 +5,7 @@
 # Antes: copie .env.exemplo para .env e cole a sua chave (https://aistudio.google.com/apikey).
 # Uso:   bash scripts/importar-credenciais.sh [nome-do-container]   (padrão: ng-soc-automacao-n8n-1)
 #
-# O Gmail usa OAuth (login no navegador), então é configurado pela tela do n8n; veja o README.
+# O Outlook usa OAuth (login no navegador), então é configurado pela tela do n8n; veja o README.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export MSYS_NO_PATHCONV=1
