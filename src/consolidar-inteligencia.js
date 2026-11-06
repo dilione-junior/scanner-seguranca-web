@@ -8,12 +8,20 @@
 const a = $input.first().json.auditoria;
 const agora = Date.now();
 
+// Respostas guardadas no Redis numa análise recente da mesma URL (nó "Usar cache").
+let cache = { hit: false, respostas: {}, em: '' };
+try { cache = $('Usar cache').first().json; } catch (erro) { /* sem cache */ }
+
 function resposta(nome) {
   let json;
-  try {
-    json = $(nome).first().json;
-  } catch (erro) {
-    return { executada: false, ok: false, status: 0, corpo: null, erro: 'não consultada' };
+  if (cache.hit && cache.respostas?.[nome]) {
+    json = cache.respostas[nome];
+  } else {
+    try {
+      json = $(nome).first().json;
+    } catch (erro) {
+      return { executada: false, ok: false, status: 0, corpo: null, erro: 'não consultada' };
+    }
   }
   if (json.error && json.statusCode === undefined) {
     return { executada: true, ok: false, status: 0, corpo: null, erro: textoCurto(json.error.message ?? json.error, 120) };
@@ -407,6 +415,7 @@ return [{
         fontesReputacao,
         vereditoAutomatico: veredito,
         notaAutomatica: nota,
+        cache: { usado: Boolean(cache.hit), em: cache.hit ? cache.em : '' },
       },
     },
   },

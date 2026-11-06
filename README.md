@@ -42,7 +42,9 @@ O campo **Contexto** (opcional) recebe de onde veio o link, por exemplo: "e-mail
 | **Cabeçalhos e cookies** | Regras automáticas | CSP, HSTS, nosniff, clickjacking, Referrer/Permissions-Policy, cookies sem Secure/HttpOnly/SameSite, versão exposta, CORS `*` |
 | **Conteúdo da página** | IA de conteúdo (Gemini) | Formulário de senha imitando marca, JavaScript ofuscado, redirecionamentos, iframes ocultos, chaves expostas, scripts sem SRI, tecnologias e versões |
 
-As fontes são **só consultadas**: nenhuma URL é enviada para análise pública. Se uma fonte falhar, ou estiver sem chave ou sem cota, o relatório sai com as outras e mostra quais não responderam.
+As fontes são **só consultadas**: nenhuma URL é enviada para análise pública.
+
+**Cache (opcional, Redis):** as respostas das fontes ficam guardadas por 24 h, separadas por URL e por modo, e por só 1 h se alguma fonte falhou. Repetir a análise da mesma URL não gasta cota (nem a análise privada do urlscan) e sai mais rápido. A leitura da página e a postura são sempre refeitas. O relatório avisa quando a reputação veio do cache e de quando ela é. Sem Redis, o fluxo funciona igual, só sem cache. Se uma fonte falhar, ou estiver sem chave ou sem cota, o relatório sai com as outras e mostra quais não responderam.
 
 ### Cuidado com falso positivo
 
@@ -160,6 +162,7 @@ O script só cria as credenciais cujas chaves estão preenchidas, nunca imprime 
 | OTX (X-OTX-API-KEY) | *Header Auth* | `X-OTX-API-KEY` | https://otx.alienvault.com/api |
 | AbuseIPDB (Key) | *Header Auth* | `Key` | https://www.abuseipdb.com/account/api |
 | urlscan.io (API-Key) | *Header Auth* | `API-Key` | https://urlscan.io/user/signup (depois, *Settings & API*) |
+| Redis (opcional, para o cache) | *Redis* | — | seu servidor Redis (host, porta, senha) |
 
 O `importar-fluxo.sh` liga os nós às credenciais existentes pelo nome (ou pelo tipo, quando só existe uma daquele tipo).
 
@@ -205,6 +208,8 @@ Outros ajustes no nó **Configuração**:
 | `enviarEmail` | `false` | Envia também por Outlook |
 | `emailDestino` | vazio | Quem recebe o relatório |
 | `limiteConteudo` | `60000` | Quantos caracteres do HTML vão para a IA |
+| `cacheHoras` | `24` | Por quanto tempo a reputação de uma URL fica no cache (1 h se alguma fonte falhou) |
+| `prefixoCache` | `scanner:` | Começo das chaves no Redis (`scanner:intel:<modo>:<URL em base64url>`) |
 | `urlscanVisibilidade` | `private` | `private` (só você vê) ou `unlisted`. **Nunca** `public`: qualquer outro valor vira `private` |
 
 ## Como a nota de postura (A+ a F) é calculada
@@ -230,7 +235,7 @@ Uma CSP com `'unsafe-inline'` (sem nonce ou hash) desce a nota um degrau. **Sem 
 O código de cada nó *Code* fica em [src/](src/), em arquivos `.js` legíveis, e as bibliotecas comuns ficam em [src/lib/](src/lib/). O JSON do fluxo é **gerado** a partir deles:
 
 ```bash
-node tests/testar-codigo.js      # 126 testes: SSRF, DNS, modo só reputação, urlscan, falsos positivos, travas da IA, escape do HTML
+node tests/testar-codigo.js      # 132 testes: SSRF, DNS, modo só reputação, urlscan, cache, falsos positivos, travas da IA, escape do HTML
 python scripts/gerar-fluxo.py    # gera workflow/scanner-seguranca-web.json
 ```
 
@@ -246,6 +251,7 @@ scanner-seguranca-web/
 │   ├── validar-url.js  verificar-dns.js  tratar-resposta.js  sem-visita.js
 │   ├── preparar-consultas.js     consultas às fontes de inteligência
 │   ├── processar-resultados.js   postura (A+ a F)
+│   ├── usar-cache.js  montar-cache.js   cache das fontes no Redis
 │   ├── consolidar-inteligencia.js  sinais, veredito e nota automáticos
 │   ├── montar-dossie.js     o que a IA analista recebe (sem o HTML cru)
 │   ├── parecer-final.js     travas sobre a resposta da IA
@@ -258,11 +264,10 @@ scanner-seguranca-web/
 
 ## Roteiro (próximas melhorias)
 
-Ideias já aprovadas, a fazer uma de cada vez (a integração com o **urlscan.io** já foi feita):
+Ideias já aprovadas, a fazer uma de cada vez (já feitos: **urlscan.io** e **cache no Redis**):
 
 | Melhoria | Para que serve | Como |
 |---|---|---|
-| **Cache das consultas** | Não gastar cota repetindo o mesmo site (o VirusTotal grátis permite 500 consultas por dia) e responder mais rápido | Guardar o resultado de cada fonte no Redis por 24 h (1 h se a fonte falhou), com chave pelo hash do host/URL, como já faz a reputação de IP do laboratório NG-SOC |
 | **Chamado e aviso automáticos** | Veredito "malicioso" não depender de alguém ler o relatório | Abrir chamado no GLPI com o "texto para o chamado" e os IOCs, e avisar no Telegram do SOC. O bloqueio continua sempre com aprovação humana |
 
 Outras ideias: consultar também o domínio original quando a cadeia de redirecionamentos passa por outro domínio (encurtadores), e cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
