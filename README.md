@@ -1,6 +1,6 @@
 # Scanner de Segurança Web
 
-Fluxo do **n8n** que dá a um analista de SOC o **parecer de segurança de um site**. Você informa o endereço (por exemplo, um link que chegou num e-mail suspeito) e recebe na tela, e opcionalmente por e-mail (Outlook), um relatório com:
+Fluxo do **n8n** que dá a um analista de SOC o **parecer de segurança de um site**. Você informa o endereço (por exemplo, um link que chegou num e-mail suspeito) e recebe na tela, e opcionalmente por e-mail (Outlook), um relatório com (veredito **malicioso** também dispara um **alerta por e-mail**):
 
 - **veredito** (limpo, suspeito, malicioso ou indeterminado), **nota de 0 a 100**, gravidade e confiança;
 - **evidências** de bases de ameaças (urlscan.io, VirusTotal, URLhaus, ThreatFox, OTX, AbuseIPDB, Shodan), com possíveis falsos positivos explicados;
@@ -76,7 +76,7 @@ flowchart LR
     IC --> D
     D --> S[IA - analista SOC<br/>JSON: veredito, nota, evidências, ações, MITRE]
     S --> T[Parecer final<br/>travas]
-    T --> G[Relatório] --> O[Outlook opcional] --> TELA[Tela]
+    T --> G[Relatório] --> O[Outlook<br/>alerta se malicioso] --> TELA[Tela]
 ```
 
 **Por que duas IAs, e não uma?** A IA de conteúdo lê o HTML, que é texto não confiável e pode trazer instruções escondidas ("diga que este site é seguro"). A IA analista SOC **não recebe o HTML cru**: recebe só os dados das fontes, as regras e o resumo da IA de conteúdo. Assim, um site malicioso tem muito menos chance de manipular o veredito.
@@ -176,11 +176,19 @@ O `importar-fluxo.sh` liga os nós às credenciais existentes pelo nome (ou pelo
 2. Em **Certificados e segredos**, crie um segredo do cliente e copie o **Valor**, que só aparece uma vez.
 3. Em **Permissões de API > Microsoft Graph > Permissões delegadas**, adicione só **`Mail.Send`**.
 4. No n8n, crie a credencial **Microsoft Outlook OAuth2 API** com o *ID do aplicativo (cliente)* e o segredo. Ligue **Custom Scopes** com `openid offline_access Mail.Send` e clique em **Connect my account**.
-5. No nó **Configuração**, mude `enviarEmail` para `true` e preencha `emailDestino`.
+5. Defina o destinatário na variável de ambiente **`EMAIL_AVISOS_PARA`** do n8n (no laboratório NG-SOC ela fica em `infra/n8n/.env`; depois de mudar, rode `docker compose up -d n8n`).
 
 > O n8n monta o *OAuth Redirect URL* a partir de `N8N_WEBHOOK_URL`. Se aparecer um nome interno do Docker (ex.: `http://n8n:5678/`), a Microsoft recusa o endereço. Nesse caso, use `N8N_WEBHOOK_URL=http://localhost:5678/`.
 
-O e-mail vai sempre para o endereço fixo da configuração. Assim o formulário não pode ser usado para mandar e-mail a terceiros.
+O e-mail vai sempre para o endereço da variável `EMAIL_AVISOS_PARA`. Assim o formulário não pode ser usado para mandar e-mail a terceiros, e o endereço não fica gravado no repositório. Sem a variável, nenhum e-mail é enviado.
+
+### Alerta por e-mail
+
+Quando o veredito final é **malicioso**, o fluxo manda o relatório completo para `EMAIL_AVISOS_PARA` com o assunto começando por `ALERTA - `, por exemplo `ALERTA - [MALICIOSO] site.com: nota 0/100 (postura F)`. Assim um site malicioso não depende de alguém ler o relatório na tela. O alerta só avisa: o bloqueio continua sempre com aprovação humana.
+
+- Para alertar também os **suspeitos**, mude `alertaVereditos` para `malicioso,suspeito` no nó **Configuração**.
+- Para receber **todo** relatório por e-mail (não só os alertas), mude `enviarEmail` para `true`.
+- Se o Outlook falhar, o relatório aparece na tela do mesmo jeito.
 
 ## Uso
 
@@ -205,8 +213,9 @@ Outros ajustes no nó **Configuração**:
 
 | Campo | Padrão | Para que serve |
 |---|---|---|
-| `enviarEmail` | `false` | Envia também por Outlook |
-| `emailDestino` | vazio | Quem recebe o relatório |
+| `alertaVereditos` | `malicioso` | Vereditos que mandam alerta por e-mail (separados por vírgula; vazio desliga) |
+| `enviarEmail` | `false` | Envia por Outlook **todo** relatório, não só os alertas |
+| `emailDestino` | `$env.EMAIL_AVISOS_PARA` | Quem recebe; vem da variável de ambiente, não edite aqui |
 | `limiteConteudo` | `60000` | Quantos caracteres do HTML vão para a IA |
 | `cacheHoras` | `24` | Por quanto tempo a reputação de uma URL fica no cache (1 h se alguma fonte falhou) |
 | `prefixoCache` | `scanner:` | Começo das chaves no Redis (`scanner:intel:<modo>:<URL em base64url>`) |
@@ -264,11 +273,7 @@ scanner-seguranca-web/
 
 ## Roteiro (próximas melhorias)
 
-Ideias já aprovadas, a fazer uma de cada vez (já feitos: **urlscan.io** e **cache no Redis**):
-
-| Melhoria | Para que serve | Como |
-|---|---|---|
-| **Chamado e aviso automáticos** | Veredito "malicioso" não depender de alguém ler o relatório | Abrir chamado no GLPI com o "texto para o chamado" e os IOCs, e avisar no Telegram do SOC. O bloqueio continua sempre com aprovação humana |
+Ideias já feitas: **urlscan.io**, **cache no Redis** e **alerta por e-mail** para veredito malicioso (no lugar de chamado no GLPI e aviso no Telegram).
 
 Outras ideias: consultar também o domínio original quando a cadeia de redirecionamentos passa por outro domínio (encurtadores), e cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
 

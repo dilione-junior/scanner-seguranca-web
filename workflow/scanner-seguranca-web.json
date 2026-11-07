@@ -94,9 +94,15 @@
               "type": "boolean"
             },
             {
+              "id": "225ce7cc-693b-55a8-bc2d-cd13a31f0fa2",
+              "name": "alertaVereditos",
+              "value": "malicioso",
+              "type": "string"
+            },
+            {
               "id": "31b6e52b-29d2-54ab-a298-befa32f7eff5",
               "name": "emailDestino",
-              "value": "",
+              "value": "={{ $env.EMAIL_AVISOS_PARA || '' }}",
               "type": "string"
             },
             {
@@ -1484,7 +1490,7 @@
           "conditions": [
             {
               "id": "da36871b-a71f-599a-9e8d-715c1e405609",
-              "leftValue": "={{ $('Configuração').first().json.enviarEmail }}",
+              "leftValue": "={{ $('Configuração').first().json.enviarEmail === true || String($('Configuração').first().json.alertaVereditos ?? '').toLowerCase().split(',').map(v => v.trim()).filter(Boolean).includes($('Gerar relatório').first().json.veredito) }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -1523,7 +1529,7 @@
         "resource": "message",
         "operation": "send",
         "toRecipients": "={{ $('Configuração').first().json.emailDestino }}",
-        "subject": "={{ $('Gerar relatório').first().json.assunto }}",
+        "subject": "={{ (String($('Configuração').first().json.alertaVereditos ?? '').toLowerCase().split(',').map(v => v.trim()).filter(Boolean).includes($('Gerar relatório').first().json.veredito)) ? 'ALERTA - ' : '' }}{{ $('Gerar relatório').first().json.assunto }}",
         "bodyContent": "={{ $('Gerar relatório').first().json.html }}",
         "additionalFields": {
           "bodyContentType": "html"
@@ -1592,7 +1598,7 @@
         -160
       ],
       "parameters": {
-        "content": "## Como configurar\n1. **Gemini:** credencial *Google Gemini (PaLM) API* com a chave de https://aistudio.google.com/apikey.\n2. **Reputação:** credenciais *Header Auth* com estes nomes (ou rode `scripts/importar-credenciais.sh`):\n   - `VirusTotal (x-apikey)`: cabeçalho `x-apikey`\n   - `abuse.ch (Auth-Key)`: cabeçalho `Auth-Key` (URLhaus e ThreatFox)\n   - `OTX (X-OTX-API-KEY)`: cabeçalho `X-OTX-API-KEY`\n   - `AbuseIPDB (Key)`: cabeçalho `Key`\n   - `urlscan.io (API-Key)`: cabeçalho `API-Key`\n   Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.\n   - *Redis* (opcional, para o cache): credencial do tipo Redis. Sem ela, o fluxo só não usa cache.\n3. **Outlook (opcional):** veja o README; no nó **Configuração**, `enviarEmail` = `true` e `emailDestino`.\n4. **Publique** o fluxo (salvar não publica): http://127.0.0.1:5678/form/scanner-seguranca-web\n\nFonte sem chave ou fora do ar não trava o fluxo: o relatório sai com as que responderam.",
+        "content": "## Como configurar\n1. **Gemini:** credencial *Google Gemini (PaLM) API* com a chave de https://aistudio.google.com/apikey.\n2. **Reputação:** credenciais *Header Auth* com estes nomes (ou rode `scripts/importar-credenciais.sh`):\n   - `VirusTotal (x-apikey)`: cabeçalho `x-apikey`\n   - `abuse.ch (Auth-Key)`: cabeçalho `Auth-Key` (URLhaus e ThreatFox)\n   - `OTX (X-OTX-API-KEY)`: cabeçalho `X-OTX-API-KEY`\n   - `AbuseIPDB (Key)`: cabeçalho `Key`\n   - `urlscan.io (API-Key)`: cabeçalho `API-Key`\n   Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.\n   - *Redis* (opcional, para o cache): credencial do tipo Redis. Sem ela, o fluxo só não usa cache.\n3. **Outlook (opcional):** veja o README. O destino vem da variável `EMAIL_AVISOS_PARA` do n8n. Veredito em `alertaVereditos` (padrão `malicioso`) manda alerta; `enviarEmail` = `true` manda todo relatório.\n4. **Publique** o fluxo (salvar não publica): http://127.0.0.1:5678/form/scanner-seguranca-web\n\nFonte sem chave ou fora do ar não trava o fluxo: o relatório sai com as que responderam.",
         "width": 520,
         "height": 520,
         "color": 4

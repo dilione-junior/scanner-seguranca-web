@@ -137,8 +137,13 @@ no("Configuração", "n8n-nodes-base.set", 3.4, [-1140, 400], {
         {"id": id_no("cfg-modo"), "name": "modo", "value": "={{ String($json['Modo da análise'] ?? '').startsWith('Completa') ? 'completa' : 'reputacao' }}", "type": "string"},
         {"id": id_no("cfg-contexto"), "name": "contexto", "value": "={{ String($json['Contexto (opcional)'] ?? '').slice(0, 500) }}", "type": "string"},
         {"id": id_no("cfg-saltos"), "name": "saltos", "value": 0, "type": "number"},
+        # Relatório de TODA análise por e-mail (desligado). O alerta abaixo vale mesmo com ele desligado.
         {"id": id_no("cfg-email"), "name": "enviarEmail", "value": False, "type": "boolean"},
-        {"id": id_no("cfg-destino"), "name": "emailDestino", "value": "", "type": "string"},
+        # Alerta por e-mail quando o veredito estiver nesta lista (separada por vírgula; vazio desliga).
+        {"id": id_no("cfg-alerta"), "name": "alertaVereditos", "value": "malicioso", "type": "string"},
+        # O destino vem da variável de ambiente EMAIL_AVISOS_PARA do n8n: o repositório é público
+        # e o formulário não pode escolher para quem o e-mail vai.
+        {"id": id_no("cfg-destino"), "name": "emailDestino", "value": "={{ $env.EMAIL_AVISOS_PARA || '' }}", "type": "string"},
         {"id": id_no("cfg-limite"), "name": "limiteConteudo", "value": 60000, "type": "number"},
         # "private" (só você vê; 50/dia no plano grátis) ou "unlisted". "public" nunca é usado.
         {"id": id_no("cfg-urlscan"), "name": "urlscanVisibilidade", "value": "private", "type": "string"},
@@ -401,11 +406,15 @@ for nome, posicao, temperatura in (("Gemini (conteúdo)", [3340, 900], 0.2), ("G
 # ---------------- Relatório ----------------
 no_codigo("Parecer final", [3920, 760], "parecer-final.js", "dominio.js")
 no_codigo("Gerar relatório", [4140, 760], "gerar-relatorio.js", "html.js", "dominio.js")
+# Alerta: o veredito final está na lista alertaVereditos da Configuração.
+EH_ALERTA = ("String($('Configuração').first().json.alertaVereditos ?? '').toLowerCase().split(',')"
+             ".map(v => v.trim()).filter(Boolean).includes($('Gerar relatório').first().json.veredito)")
+MANDAR_EMAIL = f"$('Configuração').first().json.enviarEmail === true || {EH_ALERTA}"
 no("Enviar e-mail?", "n8n-nodes-base.if", 2.2, [4360, 760], {
     "conditions": {
         "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
         "conditions": [
-            {"id": id_no("email-ligado"), "leftValue": "={{ $('Configuração').first().json.enviarEmail }}", **VERDADEIRO},
+            {"id": id_no("email-ligado"), "leftValue": f"={{{{ {MANDAR_EMAIL} }}}}", **VERDADEIRO},
             {"id": id_no("email-destino"), "leftValue": "={{ $('Configuração').first().json.emailDestino }}",
              "rightValue": "", "operator": {"type": "string", "operation": "notEmpty", "singleValue": True}},
         ],
@@ -419,7 +428,7 @@ no("Enviar por Outlook", "n8n-nodes-base.microsoftOutlook", 2, [4580, 640], {
     "resource": "message",
     "operation": "send",
     "toRecipients": "={{ $('Configuração').first().json.emailDestino }}",
-    "subject": "={{ $('Gerar relatório').first().json.assunto }}",
+    "subject": f"={{{{ ({EH_ALERTA}) ? 'ALERTA - ' : '' }}}}{{{{ $('Gerar relatório').first().json.assunto }}}}",
     "bodyContent": "={{ $('Gerar relatório').first().json.html }}",
     "additionalFields": {"bodyContentType": "html"},
 }, credentials=CRED_OUTLOOK, onError="continueRegularOutput")
@@ -445,7 +454,7 @@ nota("Nota - Como configurar", [-1420, -160], 520, 520, 4, """## Como configurar
    - `urlscan.io (API-Key)`: cabeçalho `API-Key`
    Shodan InternetDB, RDAP, dns.google e Mozilla Observatory não pedem chave.
    - *Redis* (opcional, para o cache): credencial do tipo Redis. Sem ela, o fluxo só não usa cache.
-3. **Outlook (opcional):** veja o README; no nó **Configuração**, `enviarEmail` = `true` e `emailDestino`.
+3. **Outlook (opcional):** veja o README. O destino vem da variável `EMAIL_AVISOS_PARA` do n8n. Veredito em `alertaVereditos` (padrão `malicioso`) manda alerta; `enviarEmail` = `true` manda todo relatório.
 4. **Publique** o fluxo (salvar não publica): http://127.0.0.1:5678/form/scanner-seguranca-web
 
 Fonte sem chave ou fora do ar não trava o fluxo: o relatório sai com as que responderam.""")
