@@ -34,7 +34,39 @@ const NOMES_CABECALHOS = {
   'x-permitted-cross-domain-policies': 'X-Permitted-Cross-Domain-Policies',
 };
 const v = VEREDITOS[p.veredito] ?? VEREDITOS.indeterminado;
-const corNota = p.nota >= 80 ? '#15803d' : p.nota >= 60 ? '#1d4ed8' : p.nota >= 40 ? '#b45309' : '#b91c1c';
+// Por dentro a nota é de SEGURANÇA (100 = seguro). Para o analista mostramos o RISCO (100 = máximo),
+// que é o jeito comum de ler em SOC: site malicioso aparece com risco alto, não com "nota 0".
+const risco = (nota) => 100 - Math.max(0, Math.min(100, Math.round(Number(nota) || 0)));
+const riscoFinal = risco(p.nota);
+const NIVEL_RISCO = riscoFinal >= 70 ? 'crítico/alto' : riscoFinal >= 40 ? 'moderado' : riscoFinal >= 20 ? 'baixo' : 'mínimo';
+const corNota = riscoFinal >= 60 ? '#b91c1c' : riscoFinal >= 40 ? '#b45309' : riscoFinal >= 20 ? '#1d4ed8' : '#15803d';
+const maiuscula = (t) => { const x = String(t ?? ''); return x.charAt(0).toUpperCase() + x.slice(1); };
+
+// Detecções por fonte, em frases curtas: usadas no parecer (tela/e-mail) e no texto para copiar.
+function deteccoes() {
+  const d = [];
+  const add = (fonte, alerta, texto) => d.push({ fonte, alerta: Boolean(alerta), texto });
+  const motores = (x) => x.malicioso + x.suspeito + x.inofensivo + (x.naoDetectado ?? 0);
+  if (f.vtUrl?.naoVista) add('VirusTotal (URL)', false, 'URL nunca analisada');
+  else if (f.vtUrl) add('VirusTotal (URL)', f.vtUrl.malicioso > 0, `${f.vtUrl.malicioso} de ${motores(f.vtUrl)} motores: malicioso${f.vtUrl.suspeito ? `; ${f.vtUrl.suspeito} suspeito` : ''}`);
+  if (f.vtDominio) add(`VirusTotal (${a.ehIP ? 'IP' : 'domínio'})`, f.vtDominio.malicioso > 0, `${f.vtDominio.malicioso} de ${motores(f.vtDominio)} motores: malicioso${f.vtDominio.suspeito ? `; ${f.vtDominio.suspeito} suspeito` : ''} · reputação ${f.vtDominio.reputacao}`);
+  if (f.urlhaus) add('URLhaus', f.urlhaus.exata || f.urlhaus.online > 0, f.urlhaus.exata
+    ? `URL listada (${f.urlhaus.exata.ameaca}, ${f.urlhaus.exata.status}) · ${f.urlhaus.totalUrls} URL(s) do host, ${f.urlhaus.online} online`
+    : f.urlhaus.listado ? `${f.urlhaus.totalUrls} URL(s) do host listadas, ${f.urlhaus.online} online` : 'sem registro');
+  if (f.threatfox) add('ThreatFox', f.threatfox.exatos.length > 0, f.threatfox.exatos.length
+    ? f.threatfox.exatos.map((x) => `${x.malware} (${x.tipo}, confiança ${x.confianca}%)`).join('; ')
+    : f.threatfox.total ? `${f.threatfox.total} IOC(s) no host (não o endereço exato)` : 'nenhum IOC');
+  if (f.abuseipdb) add('AbuseIPDB', f.abuseipdb.pontuacao >= 50, `${f.abuseipdb.pontuacao}% de confiança de abuso, ${f.abuseipdb.denuncias} denúncia(s) · ${f.abuseipdb.provedor} (${f.abuseipdb.pais})`);
+  if (f.otx) add('OTX AlienVault', !f.otx.confiavel && f.otx.pulsos > 0, `${f.otx.pulsos} relatório(s) de ameaça${f.otx.confiavel ? ' (domínio confiável, desconsiderados)' : ''}`);
+  if (f.urlscan?.analise) {
+    const an = f.urlscan.analise;
+    const h = f.urlscan.historico;
+    add('urlscan.io', an.malicioso || an.marcas.length > 0, `${an.malicioso ? 'página maliciosa' : 'sem veredito malicioso'} (pontuação ${an.pontuacao})${an.marcas.length ? ` · imita ${an.marcas.join(', ')}` : ''} · ${h.total} análise(s) do host${h.tags.length ? ` · tags (não verificadas): ${h.tags.join(', ')}` : ''}`);
+  }
+  return d;
+}
+const listaDeteccoes = deteccoes();
+const fontesComAlerta = listaDeteccoes.filter((x) => x.alerta).length;
 
 const caixa = (titulo, conteudo) => `
   <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 18px;margin:0 0 16px">
@@ -52,17 +84,19 @@ function blocoParecer() {
   return `
     <table style="width:100%;border-collapse:collapse"><tr>
       <td style="width:120px;vertical-align:top;padding-right:14px;text-align:center">
-        <div style="width:104px;height:104px;border-radius:52px;border:8px solid ${corNota};box-sizing:border-box;line-height:88px;font-size:38px;font-weight:bold;color:${corNota}">${escapar(p.nota)}</div>
-        <div style="font-size:12px;color:#475569;margin-top:4px">nota de 0 a 100</div>
+        <div style="width:104px;height:104px;border-radius:52px;border:8px solid ${corNota};box-sizing:border-box;line-height:88px;font-size:38px;font-weight:bold;color:${corNota}">${escapar(riscoFinal)}</div>
+        <div style="font-size:12px;color:#475569;margin-top:4px">risco de 0 a 100<br>(100 = máximo)</div>
       </td>
       <td style="vertical-align:top;font-size:14px">
         <div style="display:inline-block;padding:6px 12px;border-radius:6px;background:${v.cor};color:#fff;font-weight:bold;font-size:16px">${v.rotulo}</div>
         ${p.classificacao ? `<span style="margin-left:8px;color:#334155">${escapar(p.classificacao)}</span>` : ''}
         <table style="border-collapse:collapse;margin-top:10px">
+          ${linha('Risco:', `<strong style="color:${corNota}">${escapar(riscoFinal)}/100 (${escapar(NIVEL_RISCO)})</strong>`)}
+          ${linha('Detecções:', `${escapar(fontesComAlerta)} de ${escapar(listaDeteccoes.length)} fonte(s) com alerta`)}
           ${linha('Gravidade:', escapar(p.gravidade))}
           ${linha('Confiança:', escapar(p.confianca))}
           ${linha('Parecer por:', p.origem === 'ia' ? 'IA analista SOC (Gemini), com travas automáticas' : '<span style="color:#b45309">regras automáticas (IA indisponível)</span>')}
-          ${linha('Base automática:', `${escapar(intel.vereditoAutomatico)}, ${escapar(intel.notaAutomatica)}/100, ${escapar(intel.fontesReputacao)} fonte(s) de reputação`)}
+          ${linha('Base automática:', `${escapar(intel.vereditoAutomatico)}, risco ${escapar(risco(intel.notaAutomatica))}/100, ${escapar(intel.fontesReputacao)} fonte(s) de reputação`)}
         </table>
       </td>
     </tr></table>
@@ -113,7 +147,7 @@ function blocoSinais() {
   if (!intel.sinais.length) return '<p style="margin:0">Nenhum sinal de risco nas fontes consultadas.</p>';
   return intel.sinais.map((s) => {
     const n = NIVEIS[s.nivel] ?? NIVEIS.info;
-    return `<div style="border-left:4px solid ${n.cor};background:${n.fundo};padding:8px 10px;margin:0 0 8px;border-radius:0 6px 6px 0;font-size:13px">${etiqueta(n.rotulo, n.cor)}<strong>${escapar(s.fonte)}:</strong> ${escapar(s.texto)} <span style="color:#64748b">(−${escapar(s.pontos)})</span></div>`;
+    return `<div style="border-left:4px solid ${n.cor};background:${n.fundo};padding:8px 10px;margin:0 0 8px;border-radius:0 6px 6px 0;font-size:13px">${etiqueta(n.rotulo, n.cor)}<strong>${escapar(s.fonte)}:</strong> ${escapar(s.texto)} <span style="color:#64748b">(+${escapar(s.pontos)} de risco)</span></div>`;
   }).join('');
 }
 
@@ -138,18 +172,56 @@ function blocoDominio() {
 }
 
 // ---------------- IOCs e texto para chamado ----------------
-const iocs = [...new Set([a.urlOriginal, a.urlFinal, a.host, a.dominio, ...(a.ips ?? []), ...(a.hostsCadeia ?? [])].filter(Boolean))];
+// Texto puro, com seções numeradas: cola igual no Teams, no e-mail e no chamado (GLPI ou outro).
+// Tudo que aponta para o alvo sai desarmado (hxxp, [.]).
+const tipoIoc = (x) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(x) ? 'URL' : /^[\d.]+$|:/.test(x) ? 'IP' : 'Domínio');
+const iocs = [...new Set([a.urlOriginal, a.urlFinal, a.host, a.dominio, ...(a.ips ?? []), ...(a.hostsCadeia ?? [])].filter(Boolean))]
+  .map((valor) => ({ tipo: tipoIoc(valor), valor: desarmar(valor) }));
+const ACAO_POR_VEREDITO = {
+  malicioso: 'BLOQUEAR (após aprovação do responsável)',
+  suspeito: 'INVESTIGAR antes de liberar',
+  indeterminado: 'INVESTIGAR: fontes insuficientes',
+  limpo: 'Sem ação de bloqueio: nenhuma ameaça conhecida',
+};
+let numeroSecao = 0;
+const secao = (titulo, linhas) => (linhas.length ? [`${++numeroSecao}. ${titulo}`, ...linhas, ''] : []);
+const marcadores = (lista) => lista.map((x) => `- ${x}`);
 const textoChamado = [
-  `Análise de URL - ${a.dataHora}`,
-  `Veredito: ${p.veredito.toUpperCase()} | nota ${p.nota}/100 | gravidade ${p.gravidade} | confiança ${p.confianca}`,
-  `Alvo: ${desarmar(a.urlOriginal)}${a.urlFinal !== a.urlOriginal ? ` -> ${desarmar(a.urlFinal)}` : ''}`,
-  `Resumo: ${p.resumo}`,
-  p.evidencias.length ? `Evidências:\n${p.evidencias.map((x) => `- ${x}`).join('\n')}` : '',
-  p.acoes.length ? `Ações recomendadas:\n${p.acoes.map((x) => `- ${x}`).join('\n')}` : '',
-  p.mitre.length ? `MITRE: ${p.mitre.join('; ')}` : '',
-  `IOCs:\n${iocs.map((x) => `- ${desarmar(x)}`).join('\n')}`,
-  `Fontes consultadas: ${intel.consultadas.join(', ') || 'nenhuma'}`,
-].filter(Boolean).join('\n');
+  `[SOC] Parecer de análise de URL - ${p.veredito.toUpperCase()}`,
+  `Data: ${a.dataHora} | Modo: ${a.visitado ? 'completo (página lida uma vez)' : 'só reputação (site não acessado)'}`,
+  '',
+  ...secao('RESUMO DO PARECER', [
+    `Veredito: ${p.veredito.toUpperCase()}${p.classificacao ? ` - ${p.classificacao}` : ''}`,
+    `Risco: ${riscoFinal}/100 (${NIVEL_RISCO}) | Gravidade: ${maiuscula(p.gravidade)} | Confiança: ${maiuscula(p.confianca)}`,
+    `Detecções: ${fontesComAlerta} de ${listaDeteccoes.length} fonte(s) com alerta`,
+    `Ação sugerida: ${ACAO_POR_VEREDITO[p.veredito] ?? ACAO_POR_VEREDITO.indeterminado}`,
+  ]),
+  ...secao('ALVO', [
+    `URL: ${desarmar(a.urlOriginal)}`,
+    ...(a.urlFinal !== a.urlOriginal ? [`Página final: ${desarmar(a.urlFinal)}`] : []),
+    `IP: ${(a.ips ?? []).map(desarmar).join(', ') || 'nenhum'}${f.abuseipdb ? ` (${f.abuseipdb.provedor}, ${f.abuseipdb.pais})` : ''}`,
+    ...(a.contexto ? [`Contexto informado: ${a.contexto}`] : []),
+  ]),
+  ...secao('ANÁLISE', [p.resumo]),
+  ...secao('DETECÇÕES NAS FONTES', listaDeteccoes.map((x) => `- ${x.alerta ? '[ALERTA] ' : ''}${x.fonte}: ${x.texto}`)),
+  ...secao('EVIDÊNCIAS', marcadores(p.evidencias)),
+  ...secao('AÇÕES RECOMENDADAS', [...marcadores(p.acoes), ...(p.acoes.length ? ['Obs.: bloqueio e isolamento só com aprovação humana.'] : [])]),
+  ...secao('MITRE ATT&CK', marcadores(p.mitre)),
+  ...secao('IOCs (desarmados)', iocs.map((x) => `- ${x.tipo}: ${x.valor}`)),
+  ...secao('FONTES CONSULTADAS', [intel.consultadas.join(', ') || 'nenhuma']),
+  'Gerado pelo Scanner de Segurança Web. Confirme as evidências antes de bloquear ou liberar.',
+].join('\n');
+
+function blocoIocs() {
+  const cor = (tipo) => (tipo === 'URL' ? '#b91c1c' : tipo === 'IP' ? '#7c3aed' : '#1d4ed8');
+  const tabela = `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:0 0 14px">
+    <tr><th style="text-align:left;padding:6px 8px;background:#f1f5f9;border-bottom:1px solid #cbd5e1;width:90px">Tipo</th><th style="text-align:left;padding:6px 8px;background:#f1f5f9;border-bottom:1px solid #cbd5e1">Indicador (desarmado)</th></tr>
+    ${iocs.map((x) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">${etiqueta(x.tipo, cor(x.tipo))}</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-family:Consolas,monospace;word-break:break-all">${escapar(x.valor)}</td></tr>`).join('')}
+  </table>`;
+  const texto = `<div style="font-size:13px;color:#475569;margin:0 0 6px"><strong style="color:#0f172a">Parecer pronto para copiar</strong> (Teams, e-mail ou chamado): selecione o texto do quadro abaixo e copie. Os endereços já estão desarmados.</div>
+    <pre style="background:#f8fafc;color:#0f172a;border:1px solid #cbd5e1;border-left:4px solid ${v.cor};padding:12px 14px;border-radius:6px;margin:0;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapar(textoChamado)}</pre>`;
+  return tabela + texto;
+}
 
 // ---------------- Postura ----------------
 function selos() {
@@ -236,7 +308,7 @@ const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#f1f5
   ${caixa('Reputação e inteligência de ameaças', blocoInteligencia())}
   ${caixa('Sinais de risco (regras automáticas)', blocoSinais())}
   ${blocoDominio()}
-  ${caixa('IOCs e texto para o chamado', `<p style="margin:0;font-size:13px;color:#475569">Formato desarmado (hxxp, [.]), seguro para colar em chamado, e-mail ou chat.</p>${pre(textoChamado)}`)}
+  ${caixa('IOCs e parecer para copiar', blocoIocs())}
   ${blocoPostura()}
   ${a.visitado ? caixa('Análise da IA: conteúdo da página (HTML e JavaScript)', analiseIA(a.iaConteudo)) : ''}
   ${cadeiaRedirecionamentos()}
@@ -253,9 +325,10 @@ const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#f1f5
 return [{
   json: {
     html,
-    assunto: `[${p.veredito.toUpperCase()}] ${a.host}: nota ${p.nota}/100 (postura ${a.nota})`,
+    assunto: `[${p.veredito.toUpperCase()}] ${a.host}: risco ${riscoFinal}/100${a.visitado ? ` (postura ${a.nota})` : ''}`,
     veredito: p.veredito,
     nota: p.nota,
+    risco: riscoFinal,
     gravidade: p.gravidade,
     host: a.host,
     textoChamado,
