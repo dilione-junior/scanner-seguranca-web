@@ -464,7 +464,13 @@ teste('Markdown da IA é formatado', () => {
   assert.ok(relatorio.html.includes('<h3'));
   assert.ok(relatorio.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 });
-teste('assunto do e-mail tem veredito, host e nota', () => assert.match(relatorio.assunto, /^\[SUSPEITO\] exemplo\.com\.br: nota \d+\/100/));
+teste('assunto do e-mail tem veredito, host e risco', () => assert.match(relatorio.assunto, /^\[SUSPEITO\] exemplo\.com\.br: risco \d+\/100/));
+teste('risco mostrado é 100 menos a nota de segurança', () => assert.strictEqual(relatorio.risco, 100 - relatorio.nota));
+teste('texto para copiar tem as seções do parecer e alvo desarmado', () => {
+  for (const sec of ['RESUMO DO PARECER', 'ALVO', 'DETECÇÕES NAS FONTES', 'IOCs (desarmados)', 'FONTES CONSULTADAS']) assert.ok(relatorio.textoChamado.includes(sec), sec);
+  assert.match(relatorio.textoChamado, /Risco: \d+\/100/);
+  assert.ok(!/https?:\/\/exemplo\.com/.test(relatorio.textoChamado), 'alvo não pode sair armado');
+});
 teste('relatório do modo só reputação sai sem postura', () => {
   const aud = consolidar({}, {}, 'https://exemplo.com.br/', { visitado: false });
   const r = executar('gerar-relatorio.js', ['html.js', 'dominio.js'], { auditoria: parecer(aud, { error: 'sem IA' }) });

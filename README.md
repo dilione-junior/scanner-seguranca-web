@@ -2,9 +2,9 @@
 
 Fluxo do **n8n** que dá a um analista de SOC o **parecer de segurança de um site**. Você informa o endereço (por exemplo, um link que chegou num e-mail suspeito) e recebe na tela, e opcionalmente por e-mail (Outlook), um relatório com (veredito **malicioso** também dispara um **alerta por e-mail**):
 
-- **veredito** (limpo, suspeito, malicioso ou indeterminado), **nota de 0 a 100**, gravidade e confiança;
+- **veredito** (limpo, suspeito, malicioso ou indeterminado), **índice de risco de 0 a 100** (100 = risco máximo), detecções por fonte, gravidade e confiança;
 - **evidências** de bases de ameaças (urlscan.io, VirusTotal, URLhaus, ThreatFox, OTX, AbuseIPDB, Shodan), com possíveis falsos positivos explicados;
-- **ações recomendadas** para o SOC, técnicas **MITRE ATT&CK** e **IOCs desarmados** (`hxxps://exemplo[.]com`) prontos para colar no chamado;
+- **ações recomendadas** para o SOC, técnicas **MITRE ATT&CK** e **IOCs desarmados** (`hxxps://exemplo[.]com`) e um **parecer em texto pronto para colar** no Teams, no e-mail ou no chamado;
 - **postura do site**: nota de A+ a F pelos cabeçalhos de segurança e correções para quem mantém o site.
 
 O parecer é escrito por uma **IA analista SOC** (Google Gemini), mas passa por **travas automáticas**. Evidência forte nunca vira "limpo", e se a IA falhar o relatório sai com o parecer calculado pelas regras.
@@ -93,6 +93,8 @@ A antiga IA de "configuração" (que comentava os cabeçalhos) foi incorporada: 
 | IA fora do ar, sem cota ou fora do formato: vale o parecer automático, com ações padrão | O relatório sempre sai |
 
 **Nota automática (0 a 100):** começa em 100 e cada sinal desconta pontos. Exemplos: URL no URLhaus online −50, urlscan classificou como malicioso −45, marca imitada que não combina com o domínio −20, host exato no ThreatFox −45, domínio com menos de 30 dias −25, VirusTotal com 3+ motores na URL −50, postura F −12, sem SPF −3. Com evidência maliciosa a nota fica em no máximo 20; com evidência suspeita, em no máximo 60.
+
+**No relatório aparece o risco**, que é `100 - nota`: um site malicioso com nota 0 aparece como **risco 100/100**. A nota de segurança continua sendo a usada por dentro (regras, travas e IA).
 
 ## Segurança do próprio scanner
 
@@ -184,7 +186,7 @@ O e-mail vai sempre para o endereço da variável `EMAIL_AVISOS_PARA`. Assim o f
 
 ### Alerta por e-mail
 
-Quando o veredito final é **malicioso**, o fluxo manda o relatório completo para `EMAIL_AVISOS_PARA` com o assunto começando por `ALERTA - `, por exemplo `ALERTA - [MALICIOSO] site.com: nota 0/100 (postura F)`. Assim um site malicioso não depende de alguém ler o relatório na tela. O alerta só avisa: o bloqueio continua sempre com aprovação humana.
+Quando o veredito final é **malicioso**, o fluxo manda o relatório completo para `EMAIL_AVISOS_PARA` com o assunto começando por `ALERTA - `, por exemplo `ALERTA - [MALICIOSO] site.com: risco 100/100`. Assim um site malicioso não depende de alguém ler o relatório na tela. O alerta só avisa: o bloqueio continua sempre com aprovação humana.
 
 - Para alertar também os **suspeitos**, mude `alertaVereditos` para `malicioso,suspeito` no nó **Configuração**.
 - Para receber **todo** relatório por e-mail (não só os alertas), mude `enviarEmail` para `true`.
@@ -200,14 +202,14 @@ http://127.0.0.1:5678/form/scanner-seguranca-web
 
 Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputação**), descreva opcionalmente o **contexto** e clique em **Analisar site**. Em 20 a 60 segundos (até 2 minutos no modo completo, por causa do urlscan) o relatório aparece na tela, nesta ordem:
 
-1. **Parecer do analista SOC:** veredito, nota de 0 a 100, gravidade, confiança, resumo, evidências, possíveis falsos positivos, ações recomendadas, correções e MITRE ATT&CK.
+1. **Parecer do analista SOC:** veredito, risco de 0 a 100, quantas fontes deram alerta, gravidade, confiança, resumo, evidências, possíveis falsos positivos, ações recomendadas, correções e MITRE ATT&CK.
 2. **Reputação e inteligência:** o que cada fonte disse, com link para abrir no site da fonte (no urlscan, também o print da página; a análise privada abre logado na sua conta).
 3. **Sinais de risco:** cada regra que descontou pontos, e quanto.
 4. **Domínio, DNS e infraestrutura:** idade do domínio, certificado, SPF/DMARC/DNSSEC, portas e CVEs (Shodan), nota do Mozilla Observatory.
-5. **IOCs e texto para o chamado:** bloco pronto para colar no GLPI ou em outro sistema de chamados.
+5. **IOCs e parecer para copiar:** tabela de IOCs por tipo (URL, domínio, IP) e o parecer em texto puro com seções numeradas (resumo, alvo, detecções nas fontes, evidências, ações, MITRE, IOCs, fontes). Cola igual no Teams, no e-mail ou no chamado.
 6. **Postura de segurança (A+ a F)**, **análise do conteúdo**, redirecionamentos e cabeçalhos (só no modo completo).
 
-O assunto do e-mail já traz o veredito: `[MALICIOSO] site.com: nota 0/100 (postura F)`.
+O assunto do e-mail já traz o veredito e o risco: `[MALICIOSO] site.com: risco 100/100` (no modo completo, também a postura).
 
 Outros ajustes no nó **Configuração**:
 
@@ -223,7 +225,7 @@ Outros ajustes no nó **Configuração**:
 
 ## Como a nota de postura (A+ a F) é calculada
 
-Esta nota avalia só os cabeçalhos de segurança, ou seja, a postura do site. A nota de 0 a 100 do parecer é outra: ela junta ameaça e postura (veja *Como o parecer é montado*).
+Esta nota avalia só os cabeçalhos de segurança, ou seja, a postura do site. O risco de 0 a 100 do parecer é outro: ele junta ameaça e postura (veja *Como o parecer é montado*).
 
 São 4 itens críticos: **CSP**, **HSTS** (só em HTTPS), **X-Content-Type-Options: nosniff** e **proteção contra clickjacking** (X-Frame-Options ou `frame-ancestors` na CSP). Além deles, há 2 itens importantes: **Referrer-Policy** e **Permissions-Policy**.
 
