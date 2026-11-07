@@ -378,6 +378,71 @@ if (!a.ehIP) {
   } else if (busca.executada) registra('urlscan.io', false, erroDeFonte(busca));
 }
 
+// ---------------- Link encurtado / outra ponta da cadeia de redirecionamentos ----------------
+{
+  let rel = null;
+  if (cache.hit) rel = cache.respostas?.['Link relacionado']?.body ?? null;
+  else {
+    try { rel = $('Link relacionado').first().json; } catch (erro) { /* não executado */ }
+  }
+  if (rel && (rel.consultar || rel.encurtador || rel.destinoDesconhecido)) {
+    const rotulo = rel.papel === 'origem' ? 'link original' : 'destino';
+    const lr = {
+      papel: rel.papel === 'origem' ? 'origem' : rel.papel === 'destino' ? 'destino' : '',
+      rotulo,
+      url: textoCurto(rel.url, 300),
+      host: textoCurto(rel.host, 100),
+      encurtador: textoCurto(rel.encurtador, 60),
+      destinoDesconhecido: Boolean(rel.destinoDesconhecido),
+      vt: null,
+      urlhaus: null,
+    };
+    if (rel.consultar) {
+      const rv = resposta('VirusTotal (link relacionado)');
+      const at = rv.corpo?.data?.attributes;
+      if (rv.ok && at) {
+        const st = at.last_analysis_stats ?? {};
+        lr.vt = {
+          malicioso: Number(st.malicious ?? 0),
+          suspeito: Number(st.suspicious ?? 0),
+          inofensivo: Number(st.harmless ?? 0),
+          naoDetectado: Number(st.undetected ?? 0),
+          ultimaAnalise: at.last_analysis_date ? new Date(at.last_analysis_date * 1000).toISOString().slice(0, 10) : '',
+          motores: Object.entries(at.last_analysis_results ?? {}).filter(([, v]) => v?.category === 'malicious' || v?.category === 'suspicious').map(([motor, v]) => textoCurto(`${motor}: ${v.result}`, 60)).slice(0, 8),
+          link: `https://www.virustotal.com/gui/url/${encodeURIComponent(rel.vtUrlId)}`,
+        };
+        registra(`VirusTotal (${rotulo})`, true);
+        const v = lr.vt;
+        if (v.malicioso >= 3) sinal('VirusTotal', 'malicioso', 50, `${v.malicioso} motores marcam o ${rotulo} ${desarmar(lr.url)} como malicioso (${v.motores.slice(0, 3).join('; ')}).`);
+        else if (v.malicioso >= 1 || v.suspeito >= 2) sinal('VirusTotal', 'suspeito', 15, `${v.malicioso} detecção(ões) maliciosa(s) e ${v.suspeito} suspeita(s) para o ${rotulo} ${desarmar(lr.url)}.`);
+      } else if (rv.executada) {
+        if (rv.status === 404) {
+          lr.vt = { naoVista: true };
+          registra(`VirusTotal (${rotulo})`, true);
+        } else registra(`VirusTotal (${rotulo})`, false, erroDeFonte(rv));
+      }
+      const ru = resposta('URLhaus (link relacionado)');
+      const cu = ru.corpo;
+      if (ru.ok && cu && (cu.query_status === 'ok' || cu.query_status === 'no_results')) {
+        lr.urlhaus = cu.query_status === 'ok'
+          ? { listada: true, status: textoCurto(cu.url_status, 20), ameaca: textoCurto(cu.threat, 40), link: String(cu.urlhaus_reference ?? '') }
+          : { listada: false };
+        registra(`URLhaus (${rotulo})`, true);
+        const u = lr.urlhaus;
+        if (u.listada) sinal('URLhaus', u.status === 'online' ? 'malicioso' : 'suspeito', u.status === 'online' ? 50 : 25, `O ${rotulo} ${desarmar(lr.url)} está no URLhaus (${u.ameaca}, ${u.status}).`);
+      } else if (ru.executada) registra(`URLhaus (${rotulo})`, false, erroDeFonte(ru));
+    }
+    if (lr.destinoDesconhecido) {
+      sinal('Encurtador', 'info', 10, `Link encurtado (${lr.encurtador || a.host}): o destino é desconhecido. O encurtador não foi aberto (modo só reputação) e o VirusTotal não conhece o destino. A reputação do encurtador não vale para o site de destino.`);
+    } else if (lr.encurtador) {
+      sinal('Encurtador', 'info', 0, lr.papel === 'destino'
+        ? `Link encurtado (${lr.encurtador}): destino conhecido pelo VirusTotal é ${desarmar(lr.url)}, consultado também.`
+        : `Link encurtado (${lr.encurtador}): o destino final foi analisado e o link original também foi consultado.`);
+    }
+    fontes.linkRelacionado = lr;
+  }
+}
+
 // ---------------- Postura (só se o site foi visitado) ----------------
 if (a.visitado) {
   const PESO_NOTA = { 'A+': 0, A: 0, 'A-': 0, 'B+': 3, B: 3, 'B-': 3, 'C+': 6, C: 6, 'C-': 6, D: 10, F: 12 };
@@ -394,6 +459,8 @@ if (sinais.some((s) => s.nivel === 'malicioso')) veredito = 'malicioso';
 else if (sinais.some((s) => s.nivel === 'suspeito')) veredito = 'suspeito';
 else if (fontesReputacao >= 3) veredito = 'limpo';
 else veredito = 'indeterminado';
+// Link encurtado com destino desconhecido nunca é "limpo": só o encurtador foi avaliado.
+if (veredito === 'limpo' && fontes.linkRelacionado?.destinoDesconhecido) veredito = 'indeterminado';
 
 let nota = Math.max(0, 100 - sinais.reduce((soma, s) => soma + s.pontos, 0));
 if (veredito === 'malicioso') nota = Math.min(nota, 20);

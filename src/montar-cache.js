@@ -1,11 +1,12 @@
 // Nó "Montar cache": guarda no Redis as respostas das fontes de reputação desta análise,
 // já enxutas (sem o que o relatório não usa), para a próxima análise da mesma URL não gastar cota.
 // Fica 24 h (configurável); se alguma fonte falhou, só 1 h, para tentar de novo logo.
-const VERSAO = 1;
+const VERSAO = 2; // 2: inclui o link relacionado (encurtadores)
 const FONTES = [
   'urlscan (busca)', 'urlscan (enviar análise)', 'urlscan (resultado)', 'urlscan (última análise)',
   'VirusTotal (URL)', 'VirusTotal (domínio)', 'URLhaus', 'ThreatFox', 'OTX', 'AbuseIPDB',
   'Shodan InternetDB', 'RDAP (registro do domínio)', 'DNS (SPF)', 'DNS (DMARC)',
+  'VirusTotal (link relacionado)', 'URLhaus (link relacionado)',
 ];
 const alvo = $('Preparar consultas').first().json;
 const config = $('Configuração').first().json;
@@ -44,6 +45,9 @@ for (const nome of FONTES) {
   if (json.statusCode === undefined) continue; // erro de rede: não guarda, a próxima análise tenta de novo
   respostas[nome] = { statusCode: json.statusCode, body: enxugar(nome, json.body) };
 }
+
+// Decisão do nó "Link relacionado" (não é resposta HTTP): guardada para o relatório sair igual no cache.
+try { respostas['Link relacionado'] = { statusCode: 200, body: $('Link relacionado').first().json }; } catch (erro) { /* não executado */ }
 
 const horas = Math.max(1, Number(config.cacheHoras) || 24);
 const ttl = intel.falharam.length ? 3600 : horas * 3600;

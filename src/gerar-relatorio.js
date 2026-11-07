@@ -58,6 +58,9 @@ function deteccoes() {
     : f.threatfox.total ? `${f.threatfox.total} IOC(s) no host (não o endereço exato)` : 'nenhum IOC');
   if (f.abuseipdb) add('AbuseIPDB', f.abuseipdb.pontuacao >= 50, `${f.abuseipdb.pontuacao}% de confiança de abuso, ${f.abuseipdb.denuncias} denúncia(s) · ${f.abuseipdb.provedor} (${f.abuseipdb.pais})`);
   if (f.otx) add('OTX AlienVault', !f.otx.confiavel && f.otx.pulsos > 0, `${f.otx.pulsos} relatório(s) de ameaça${f.otx.confiavel ? ' (domínio confiável, desconsiderados)' : ''}`);
+  const lr = f.linkRelacionado;
+  if (lr?.vt) add(`VirusTotal (${lr.rotulo})`, lr.vt.malicioso > 0, lr.vt.naoVista ? `${lr.rotulo} nunca analisado` : `${lr.vt.malicioso} de ${motores(lr.vt)} motores: malicioso${lr.vt.suspeito ? `; ${lr.vt.suspeito} suspeito` : ''}`);
+  if (lr?.urlhaus) add(`URLhaus (${lr.rotulo})`, lr.urlhaus.listada, lr.urlhaus.listada ? `listado (${lr.urlhaus.ameaca}, ${lr.urlhaus.status})` : 'sem registro');
   if (f.urlscan?.analise) {
     const an = f.urlscan.analise;
     const h = f.urlscan.historico;
@@ -138,6 +141,10 @@ function blocoInteligencia() {
     : f.threatfox.total ? `${escapar(f.threatfox.total)} IOC(s) em URLs deste host (não é o endereço exato).` : 'Nenhum IOC.');
   if (f.otx) add('OTX AlienVault', `${escapar(f.otx.pulsos)} relatório(s) de ameaça${f.otx.confiavel ? ' · domínio em lista de confiáveis (pulsos desconsiderados)' : ''}`);
   if (f.abuseipdb) add('AbuseIPDB', `IP ${escapar(f.abuseipdb.ip)}: ${escapar(f.abuseipdb.pontuacao)}% de confiança de abuso, ${escapar(f.abuseipdb.denuncias)} denúncia(s) · ${escapar(f.abuseipdb.uso)} · ${escapar(f.abuseipdb.provedor)} (${escapar(f.abuseipdb.pais)})${f.abuseipdb.tor ? ' · <strong>Tor</strong>' : ''}`);
+  const lr = f.linkRelacionado;
+  if (lr?.vt) add(`VirusTotal (${escapar(lr.rotulo)})`, lr.vt.naoVista ? `${escapar(desarmar(lr.url))}: nunca analisado.`
+    : `${escapar(desarmar(lr.url))}<br>${lr.vt.malicioso} malicioso · ${lr.vt.suspeito} suspeito · ${lr.vt.inofensivo} inofensivo${lr.vt.ultimaAnalise ? ` (análise de ${escapar(lr.vt.ultimaAnalise)})` : ''}${lr.vt.motores.length ? `<br><span style="color:#b91c1c">${escapar(lr.vt.motores.join('; '))}</span>` : ''}${lk(lr.vt.link)}`);
+  if (lr?.urlhaus) add(`URLhaus (${escapar(lr.rotulo)})`, lr.urlhaus.listada ? `<strong style="color:#b91c1c">listado (${escapar(lr.urlhaus.ameaca)}, ${escapar(lr.urlhaus.status)})</strong>${lk(lr.urlhaus.link)}` : 'sem registro');
   if (!linhas.length) return '<p style="margin:0;color:#b45309">Nenhuma fonte de reputação respondeu.</p>';
   const falhas = intel.falharam.length ? `<p style="margin:8px 0 0;color:#b45309;font-size:13px">Fontes que não responderam: ${escapar(intel.falharam.join('; '))}</p>` : '';
   return `<table style="width:100%;border-collapse:collapse;font-size:13px">${linhas.join('')}</table>${falhas}`;
@@ -175,7 +182,8 @@ function blocoDominio() {
 // Texto puro, com seções numeradas: cola igual no Teams, no e-mail e no chamado (GLPI ou outro).
 // Tudo que aponta para o alvo sai desarmado (hxxp, [.]).
 const tipoIoc = (x) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(x) ? 'URL' : /^[\d.]+$|:/.test(x) ? 'IP' : 'Domínio');
-const iocs = [...new Set([a.urlOriginal, a.urlFinal, a.host, a.dominio, ...(a.ips ?? []), ...(a.hostsCadeia ?? [])].filter(Boolean))]
+const rel = f.linkRelacionado;
+const iocs = [...new Set([a.urlOriginal, a.urlFinal, rel?.url, a.host, a.dominio, rel?.host, ...(a.ips ?? []), ...(a.hostsCadeia ?? [])].filter(Boolean))]
   .map((valor) => ({ tipo: tipoIoc(valor), valor: desarmar(valor) }));
 const ACAO_POR_VEREDITO = {
   malicioso: 'BLOQUEAR (após aprovação do responsável)',
@@ -199,6 +207,9 @@ const textoChamado = [
   ...secao('ALVO', [
     `URL: ${desarmar(a.urlOriginal)}`,
     ...(a.urlFinal !== a.urlOriginal ? [`Página final: ${desarmar(a.urlFinal)}`] : []),
+    ...(rel?.encurtador ? [`Link encurtado: sim (${rel.encurtador})`] : []),
+    ...(rel?.papel === 'destino' ? [`Destino conhecido (VirusTotal): ${desarmar(rel.url)}`] : []),
+    ...(rel?.destinoDesconhecido ? ['Destino: desconhecido (o encurtador não foi aberto)'] : []),
     `IP: ${(a.ips ?? []).map(desarmar).join(', ') || 'nenhum'}${f.abuseipdb ? ` (${f.abuseipdb.provedor}, ${f.abuseipdb.pais})` : ''}`,
     ...(a.contexto ? [`Contexto informado: ${a.contexto}`] : []),
   ]),
@@ -296,6 +307,9 @@ const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#f1f5
     <table style="border-collapse:collapse">
       ${linha('Site:', `<code>${escapar(desarmar(a.urlOriginal))}</code>`)}
       ${a.urlFinal !== a.urlOriginal ? linha('Página final:', `<code>${escapar(desarmar(a.urlFinal))}</code>`) : ''}
+      ${rel?.encurtador ? linha('Link encurtado:', `sim (${escapar(rel.encurtador)})`) : ''}
+      ${rel?.papel === 'destino' ? linha('Destino (VirusTotal):', `<code>${escapar(desarmar(rel.url))}</code> <span style="color:#64748b">(não acessado)</span>`) : ''}
+      ${rel?.destinoDesconhecido ? linha('Destino:', '<span style="color:#b45309">desconhecido: o encurtador não foi aberto e o VirusTotal não conhece o destino</span>') : ''}
       ${linha('IP:', escapar((a.ips ?? []).join(', ') || 'nenhum'))}
       ${a.visitado ? linha('Resposta:', `${escapar(a.status)} ${escapar(a.statusMessage)}`) : ''}
       ${linha('Data:', escapar(a.dataHora))}

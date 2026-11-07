@@ -56,6 +56,17 @@ Plataformas grandes como `github.com` e `drive.google.com` hospedam arquivos de 
 - **1 motor isolado** no VirusTotal não condena (o `uol.com.br`, por exemplo, tem 1 detecção);
 - site legítimo **comprometido** continua malicioso: domínio antigo com malware ativo no host ou na URL exata.
 
+### Links encurtados e redirecionamentos
+
+Um link encurtado (`bit.ly/abc`, `tinyurl.com/...`, `encurtador.com.br/...`) esconde o destino, e a reputação do encurtador não diz nada sobre o site para onde ele leva. Quando o endereço passa por **outro domínio**, o scanner consulta também a **outra ponta** da cadeia no VirusTotal e no URLhaus (só consulta: nada é acessado, e gasta 1 consulta extra do VirusTotal):
+
+| Modo | O que as fontes principais veem | Outra ponta consultada |
+|---|---|---|
+| **Completo** | o destino final (o scanner seguiu os redirecionamentos) | o **link original** (ex.: o `bit.ly/abc`) |
+| **Só reputação** | o próprio link encurtado | o **destino que o VirusTotal já conhece** (última análise da URL) |
+
+No modo só reputação o encurtador **não é aberto**: abrir o link curto conta um clique que o autor do link pode ver. Se o VirusTotal não conhece o destino, o relatório avisa "destino desconhecido" e o veredito **nunca sai "limpo"** (fica "indeterminado", mesmo que a IA diga o contrário). O relatório, o texto para copiar e os IOCs mostram o encurtador e o destino, sempre desarmados.
+
 ## Como o parecer é montado
 
 ```mermaid
@@ -259,8 +270,10 @@ scanner-seguranca-web/
 │   ├── lib/url.js           leitura estrita de URL e redirecionamentos
 │   ├── lib/html.js          escape de HTML e Markdown seguro
 │   ├── lib/dominio.js       domínio registrado, ID de URL do VirusTotal, IOCs desarmados
+│   ├── lib/encurtador.js    lista de encurtadores de link conhecidos
 │   ├── validar-url.js  verificar-dns.js  tratar-resposta.js  sem-visita.js
 │   ├── preparar-consultas.js     consultas às fontes de inteligência
+│   ├── link-relacionado.js  outra ponta da cadeia (link original ou destino do encurtador)
 │   ├── processar-resultados.js   postura (A+ a F)
 │   ├── usar-cache.js  montar-cache.js   cache das fontes no Redis
 │   ├── consolidar-inteligencia.js  sinais, veredito e nota automáticos
@@ -275,9 +288,9 @@ scanner-seguranca-web/
 
 ## Roteiro (próximas melhorias)
 
-Ideias já feitas: **urlscan.io**, **cache no Redis** e **alerta por e-mail** para veredito malicioso (no lugar de chamado no GLPI e aviso no Telegram).
+Ideias já feitas: **urlscan.io**, **cache no Redis**, **alerta por e-mail** para veredito malicioso (no lugar de chamado no GLPI e aviso no Telegram) e **links encurtados** (consulta da outra ponta da cadeia).
 
-Outras ideias: consultar também o domínio original quando a cadeia de redirecionamentos passa por outro domínio (encurtadores), e cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
+Outras ideias: cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
 
 ## Uso ético
 

@@ -41,6 +41,7 @@ L(`- Registro do domínio (RDAP): ${f.registro ? j(f.registro) : 'sem dado'}`);
 L(`- DNS de e-mail e DNSSEC: ${f.dnsEmail ? j(f.dnsEmail) : 'sem dado'}`);
 L(`- urlscan.io (navegador real; tags do histórico vêm de quem enviou e erram muito): ${f.urlscan ? j(f.urlscan) : 'sem dado'}`);
 L(`- Mozilla Observatory: ${f.observatory ? j(f.observatory) : 'não consultado'}`);
+L(`- Link encurtado / outra ponta dos redirecionamentos (papel "origem" = link original; "destino" = destino conhecido pelo VirusTotal): ${f.linkRelacionado ? j(f.linkRelacionado) : 'não se aplica'}`);
 L(`- Fontes que falharam: ${intel.falharam.join('; ') || 'nenhuma'}`);
 L();
 L('# Sinais calculados pelas regras automáticas');
