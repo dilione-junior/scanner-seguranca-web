@@ -35,7 +35,7 @@ function teste(nome, fn) {
 
 // ---------------------------------------------------------------- Validar URL
 console.log('Validar URL');
-const validar = (url) => executar('validar-url.js', ['ip.js', 'url.js'], { url, saltos: 0 });
+const validar = (url) => executar('validar-url.js', ['ip.js', 'url.js', 'referencia.js'], { url, saltos: 0 });
 
 for (const url of ['https://exemplo.com.br', 'exemplo.com.br', 'HTTPS://WWW.Exemplo.COM./a', 'http://www.exemplo.com/pagina?x=1', 'https://8.8.8.8', 'https://[2606:4700:4700::1111]/', 'https://exemplo.com:443', 'http://xn--maa-o0a.com.br']) {
   teste(`aceita ${url}`, () => assert.strictEqual(validar(url).ok, true, validar(url).motivo));
@@ -54,15 +54,28 @@ const recusadas = [
   'http://127.0.0.1', 'http://127.1', 'http://2130706433', 'http://0x7f000001', 'http://0177.0.0.1',
   'http://10.0.0.5', 'http://172.27.0.3', 'http://192.168.1.1', 'http://169.254.169.254/latest/meta-data/',
   'http://100.64.0.1', 'http://0.0.0.0', 'http://[::1]', 'http://[::ffff:127.0.0.1]', 'http://[fd00::1]',
-  'http://[fe80::1]', 'http://[64:ff9b::a00:1]', 'https://exemplo.com:8443', 'https://exemplo.com:22',
+  'http://[fe80::1]', 'http://[64:ff9b::a00:1]', 'https://exemplo.com:0', 'https://exemplo.com:65536', 'http://127.0.0.1:45634/i',
   'https://usuario:senha@exemplo.com', 'https://exemplo.com@127.0.0.1', 'https://exemplo.com\\@127.0.0.1',
   'https://exemplo.com\\.127.0.0.1', 'http://0x7f.0.0.1', 'http://127.000.000.001', 'http://1.2.3', 'http://[::1%25eth0]',
   'https://exemplo .com', 'https://maçã.com.br', 'https://exemplo.com:0080abc', 'https://-exemplo.com', 'https://exem_plo.com',
-  'https://servidor.lan', 'http://8.8.8.8:8080',
+  'https://servidor.lan', 'http://n8n:5678/', 'http://10.0.0.5:8080',
+  // Páginas de registro em bases de ameaças: o alvo é o indicador listado nelas, não a plataforma.
+  'https://urlhaus.abuse.ch/url/4060974/', 'https://urlhaus.abuse.ch/host/exemplo.com/', 'https://threatfox.abuse.ch/ioc/123/',
+  'https://www.virustotal.com/gui/url/abc123/detection', 'https://urlscan.io/result/01a1a878-b926-738f-a0ca-18bff5dab28d/',
 ];
 for (const url of recusadas) {
   teste(`recusa ${url || '(vazio)'}`, () => assert.strictEqual(validar(url).ok, false));
 }
+for (const url of ['http://59.97.249.78:45634/i', 'https://exemplo.com:8443/', 'http://8.8.8.8:8080', 'https://exemplo.com:22', 'https://urlhaus.abuse.ch/', 'https://www.virustotal.com/']) {
+  teste(`aceita porta/endereço ${url}`, () => assert.strictEqual(validar(url).ok, true, validar(url).motivo));
+}
+teste('porta fora do padrão vai para os próximos nós', () => {
+  assert.strictEqual(validar('http://59.97.249.78:45634/i').porta, '45634');
+  assert.strictEqual(validar('http://59.97.249.78:45634/i').url, 'http://59.97.249.78:45634/i');
+  assert.strictEqual(validar('https://exemplo.com:443/').porta, '');
+});
+teste('página de registro do VirusTotal explica o que colar', () => assert.match(validar('https://www.virustotal.com/gui/url/abc/detection').motivo, /registro no VirusTotal/));
+
 
 // ---------------------------------------------------------------- Verificar DNS
 console.log('Verificar DNS');
@@ -162,7 +175,7 @@ console.log('Processar resultados');
 const pagina = (cabecalhos, urlFinal = 'https://exemplo.com.br/', extra = {}) => ({
   urlOriginal: urlFinal, urlFinal, host: 'exemplo.com.br', ips: ['8.8.8.8'], status: 200, cabecalhos, cadeia: [], visitado: true, ...extra,
 });
-const preparar = (pag) => executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pag, { 'Configuração': { modo: 'completa', contexto: '' } });
+const preparar = (pag) => executar('preparar-consultas.js', ['ip.js', 'url.js', 'dominio.js'], pag, { 'Configuração': { modo: 'completa', contexto: '' } });
 const processar = (cabecalhos, urlFinal, extra) => executar('processar-resultados.js', [], {}, {
   'Preparar consultas': preparar(pagina(cabecalhos, urlFinal, extra)),
 }).auditoria;
@@ -253,6 +266,70 @@ teste('mesmo caso sem popularidade vira malicioso (malware online no host)', () 
   }).inteligencia;
   assert.strictEqual(r.vereditoAutomatico, 'malicioso');
 });
+teste('URLhaus pela URL exata pega malware em plataforma popular (lista do host cortada)', () => {
+  const r = consolidar({
+    'VirusTotal (domínio)': vtStats(0, { popularity_ranks: { Majestic: { rank: 30 } } }),
+    'URLhaus': ok({ query_status: 'ok', url_count: '61789', blacklists: { spamhaus_dbl: 'not listed' }, urls: [{ url: 'https://exemplo.com.br/outro.exe', url_status: 'online', threat: 'malware_download' }] }),
+    'URLhaus (URL)': ok({ query_status: 'ok', url: 'https://exemplo.com.br/', url_status: 'online', threat: 'malware_download', tags: ['SmartLoader'], urlhaus_reference: 'https://urlhaus.abuse.ch/url/4060974/' }),
+  }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+  assert.strictEqual(r.fontes.urlhaus.exata.ameaca, 'malware_download');
+  assert.strictEqual(r.fontes.urlhaus.link, 'https://urlhaus.abuse.ch/url/4060974/');
+});
+teste('URLhaus pela URL exata vale mesmo se a consulta do host falhar', () => {
+  const r = consolidar({
+    'URLhaus': { error: { message: 'timeout' } },
+    'URLhaus (URL)': ok({ query_status: 'ok', url: 'https://exemplo.com.br/', url_status: 'offline', threat: 'malware_download' }),
+  }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'suspeito');
+});
+teste('URLhaus (URL) sem registro não muda nada', () => assert.strictEqual(consolidar({ 'URLhaus (URL)': ok({ query_status: 'no_results' }) }).inteligencia.vereditoAutomatico, 'limpo'));
+teste('IP com porta alta: suspeito; domínio com porta fora do padrão: só aviso', () => {
+  const ip = consolidar({}, completo, 'http://59.97.249.78:45634/i', { host: '59.97.249.78', ips: ['59.97.249.78'], visitado: false }).inteligencia;
+  assert.strictEqual(ip.vereditoAutomatico, 'suspeito');
+  assert.ok(ip.sinais.some((x) => /porta 45634/.test(x.texto)));
+  const dom = consolidar({}, completo, 'https://exemplo.com.br:8443/').inteligencia;
+  assert.strictEqual(dom.vereditoAutomatico, 'limpo');
+  assert.ok(dom.sinais.some((x) => /porta 8443/.test(x.texto)));
+});
+teste('Observatory não roda com porta fora do padrão', () => {
+  assert.strictEqual(preparar(pagina({}, 'https://exemplo.com.br:8443/')).observatorio, false);
+  assert.strictEqual(preparar(pagina({}, 'https://exemplo.com.br/')).observatorio, true);
+});
+
+// ---------------------------------------------------------------- Registro do URLhaus
+console.log('Registro do URLhaus');
+const form = (endereco, modo = 'Completa (reputação + leitura da página)', contexto = '') => ({ 'Endereço do site': endereco, 'Modo da análise': modo, 'Contexto (opcional)': contexto });
+const registro = (endereco) => executar('registro-ameaca.js', ['url.js', 'referencia.js'], form(endereco));
+teste('página do registro do URLhaus é reconhecida', () => {
+  assert.strictEqual(registro('https://urlhaus.abuse.ch/url/4060974/').registroUrlhaus, '4060974');
+  assert.strictEqual(registro('urlhaus.abuse.ch/url/4060974').registroUrlhaus, '4060974');
+});
+teste('outros endereços passam sem mudança', () => {
+  for (const e of ['https://exemplo.com.br', 'https://urlhaus.abuse.ch/', 'https://urlhaus.abuse.ch/host/x.com/', 'isto não é url', 'https://exemplo.com/url/4060974/']) {
+    const r = registro(e);
+    assert.strictEqual(r.registroUrlhaus, '', e);
+    assert.strictEqual(r['Endereço do site'], e);
+  }
+});
+const usarRegistro = (resposta, contexto = '') => executar('usar-registro.js', ['dominio.js'], resposta,
+  { 'Registro de base de ameaças?': { ...form('https://urlhaus.abuse.ch/url/4060974/', 'Completa (reputação + leitura da página)', contexto), registroUrlhaus: '4060974' } });
+const respostaRegistro = ok({ query_status: 'ok', id: '4060974', url: 'https://raw.githubusercontent.com/x/y/main/Software-v1.5.zip', url_status: 'online', threat: 'malware_download', tags: ['github', 'SmartLoader', 'zip'] });
+teste('troca pela URL listada e força o modo só reputação', () => {
+  const r = usarRegistro(respostaRegistro, 'recebido por e-mail');
+  assert.strictEqual(r['Endereço do site'], 'https://raw.githubusercontent.com/x/y/main/Software-v1.5.zip');
+  assert.ok(!r['Modo da análise'].startsWith('Completa'));
+  assert.match(r['Contexto (opcional)'], /registro 4060974 do URLhaus \(malware_download, online, github, SmartLoader, zip\)/);
+  assert.match(r['Contexto (opcional)'], /recebido por e-mail$/);
+});
+teste('API do URLhaus fora ou sem registro: endereço original segue (e Validar URL explica)', () => {
+  for (const resp of [ok({ query_status: 'no_results' }), ok({ query_status: 'ok', url: 'javascript:alert(1)' }), { error: { message: 'timeout' } }, ok('<html>', 502)]) {
+    const r = usarRegistro(resp);
+    assert.strictEqual(r['Endereço do site'], 'https://urlhaus.abuse.ch/url/4060974/');
+    assert.ok(r['Modo da análise'].startsWith('Completa'));
+    assert.strictEqual(validar(r['Endereço do site']).ok, false);
+  }
+});
 teste('1 motor isolado no VirusTotal não condena', () => assert.strictEqual(consolidar({ 'VirusTotal (domínio)': vtStats(1, { creation_date: 946684800 }) }).inteligencia.vereditoAutomatico, 'limpo'));
 teste('ThreatFox com o host exato: malicioso', () => {
   const r = consolidar({ 'ThreatFox': ok({ query_status: 'ok', data: [{ ioc: 'exemplo.com.br:443', malware_printable: 'Cobalt Strike', threat_type: 'botnet_cc', confidence_level: 100 }] }) }).inteligencia;
@@ -287,7 +364,7 @@ const resultadoUrlscan = ({ malicioso = false, marcas = [], data = new Date().to
 const enviado = ok({ uuid: '01a1b170-a56a-779c-80a2-f8a33c16c80c', message: 'Submission successful' });
 teste('visibilidade do urlscan nunca é pública', () => {
   for (const v of ['public', 'PUBLIC', '', undefined, 'unlisted', 'private']) {
-    const r = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa', urlscanVisibilidade: v } });
+    const r = executar('preparar-consultas.js', ['ip.js', 'url.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa', urlscanVisibilidade: v } });
     assert.ok(['private', 'unlisted'].includes(r.urlscanVisibilidade), `${v} -> ${r.urlscanVisibilidade}`);
   }
 });
@@ -343,8 +420,8 @@ const montar = (respostas, falharam = []) => executar('montar-cache.js', [], {},
   'Consolidar inteligência': { auditoria: { inteligencia: { falharam } } },
 });
 teste('chave do cache muda com o modo', () => {
-  const completa = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa' } }).chaveCache;
-  const reputacao = executar('preparar-consultas.js', ['ip.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'reputacao' } }).chaveCache;
+  const completa = executar('preparar-consultas.js', ['ip.js', 'url.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'completa' } }).chaveCache;
+  const reputacao = executar('preparar-consultas.js', ['ip.js', 'url.js', 'dominio.js'], pagina({}), { 'Configuração': { modo: 'reputacao' } }).chaveCache;
   assert.notStrictEqual(completa, reputacao);
   assert.match(completa, /^scanner:intel:completa:/);
 });
@@ -502,7 +579,7 @@ teste('cache guarda as consultas e a decisão do link relacionado', () => {
   const prep = preparar(pagina(completo));
   const aud = consolidar({ 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': vtStats(6) });
   const c = JSON.parse(executar('montar-cache.js', [], {}, { ...nosRel, 'Preparar consultas': prep, 'Configuração': { cacheHoras: 24 }, 'Consolidar inteligência': { auditoria: aud } }).valor);
-  assert.strictEqual(c.versao, 2);
+  assert.strictEqual(c.versao, 3);
   assert.ok(c.respostas['VirusTotal (link relacionado)']);
   assert.strictEqual(c.respostas['Link relacionado'].body.url, relDestino.url);
 });

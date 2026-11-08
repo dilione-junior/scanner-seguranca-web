@@ -9,6 +9,9 @@ const ehIP = ehIPv4(host) || host.includes(':');
 const dominio = ehIP ? host : dominioRegistravel(host);
 const ips = Array.isArray(pagina.ips) ? pagina.ips : [];
 const ipPrincipal = ips.find(ehIPv4) ?? ips[0] ?? '';
+// Porta fora do padrão (ex.: http://1.2.3.4:45634/i). Vazio = 80/443.
+let porta = '';
+try { porta = analisarUrl(pagina.urlFinal).porta; } catch (erro) { /* URL já validada antes */ }
 
 // Hosts diferentes que apareceram nos redirecionamentos (encurtadores, rastreadores, cadeias de phishing).
 const hostsCadeia = [];
@@ -25,11 +28,13 @@ return [{
     ehIP,
     dominio,
     ipPrincipal,
+    porta,
     hostsCadeia,
     vtUrlId: base64Url(pagina.urlFinal),
     vtEntidade: ehIP ? `ip_addresses/${encodeURIComponent(host)}` : `domains/${encodeURIComponent(dominio)}`,
     rdap: ehIP ? `ip/${encodeURIComponent(host)}` : `domain/${encodeURIComponent(dominio)}`,
-    observatorio: Boolean(pagina.visitado) && !ehIP,
+    // O Observatory só testa as portas 80/443: com outra porta, avaliaria outro serviço.
+    observatorio: Boolean(pagina.visitado) && !ehIP && !porta,
     // urlscan.io: análise nova só no modo completo (o navegador do urlscan abre o site).
     // Nunca "public": só "private" (padrão) ou "unlisted".
     urlscanAnalisar: Boolean(pagina.visitado),

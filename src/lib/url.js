@@ -47,7 +47,9 @@ function analisarUrl(texto) {
   const portaPadrao = protocolo === 'https' ? '443' : '80';
   porta = porta.replace(/^0+(?=\d)/, '');
   if (porta === portaPadrao) porta = '';
-  if (porta && !['80', '443'].includes(porta)) throw erroUrl(`A porta ${porta} não é permitida. O scanner só analisa sites nas portas 80 e 443.`);
+  // Qualquer porta de 1 a 65535 é aceita (malware em IP:porta alta é comum). A proteção contra
+  // SSRF vem do host: nomes e IPs internos continuam recusados, em qualquer porta.
+  if (porta && !(Number(porta) >= 1 && Number(porta) <= 65535)) throw erroUrl(`A porta ${porta} é inválida (use de 1 a 65535).`);
 
   let ehIP = Boolean(ipv6);
   if (!ipv6) {

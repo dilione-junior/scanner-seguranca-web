@@ -1,7 +1,7 @@
 // Nó "Usar cache": lê o que o Redis devolveu para esta URL (respostas das fontes de reputação
 // guardadas numa análise recente). Se não houver, se estiver estragado ou se o Redis falhou,
 // segue como "sem cache" e as fontes são consultadas normalmente.
-const VERSAO = 2;
+const VERSAO = 3;
 const alvo = $('Preparar consultas').first().json;
 const bruto = $input.first().json.cache;
 

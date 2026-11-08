@@ -130,6 +130,12 @@ no("Formulário", "n8n-nodes-base.formTrigger", 2.2, [-1360, 400], {
     "options": {"path": "scanner-seguranca-web", "buttonLabel": "Analisar site", "appendAttribution": False},
 }, webhookId="5d0f6c1e-8a2b-4c3d-9e4f-5a6b7c8d9e01")
 
+# Página de registro do URLhaus (https://urlhaus.abuse.ch/url/<n>/) no lugar da URL maliciosa:
+# a API do URLhaus diz qual URL está no registro e o fluxo analisa ESSA URL, só por reputação.
+no_codigo("Registro de base de ameaças?", [-1360, 620], "registro-ameaca.js", "url.js", "referencia.js")
+no("É registro do URLhaus?", "n8n-nodes-base.if", 2.2, [-1360, 820], condicao_if(
+    "={{ $json.registroUrlhaus }}", {"rightValue": "", "operator": {"type": "string", "operation": "notEmpty", "singleValue": True}}))
+
 no("Configuração", "n8n-nodes-base.set", 3.4, [-1140, 400], {
     "assignments": {"assignments": [
         {"id": id_no("cfg-url"), "name": "url", "value": "={{ $json['Endereço do site'] }}", "type": "string"},
@@ -154,7 +160,7 @@ no("Configuração", "n8n-nodes-base.set", 3.4, [-1140, 400], {
     "options": {},
 })
 
-no_codigo("Validar URL", [-920, 400], "validar-url.js", "ip.js", "url.js")
+no_codigo("Validar URL", [-920, 400], "validar-url.js", "ip.js", "url.js", "referencia.js")
 no("URL permitida?", "n8n-nodes-base.if", 2.2, [-700, 400], condicao_if("={{ $json.ok }}", VERDADEIRO))
 consulta_dns("DNS (IPv4)", [-480, 300], "={{ $json.host }}", "A")
 consulta_dns("DNS (IPv6)", [-260, 300], "={{ $('Validar URL').last().json.host }}", "AAAA")
@@ -192,7 +198,7 @@ no("Seguir redirecionamento?", "n8n-nodes-base.if", 2.2, [1060, 160], condicao_i
 # Todas as fontes são só CONSULTADAS (nada é enviado para análise pública) e nenhuma delas acessa
 # o site, exceto o Mozilla Observatory, que só roda no modo completo.
 # Cada consulta continua mesmo se falhar: o relatório sai com as fontes que responderam.
-no_codigo("Preparar consultas", [1280, 300], "preparar-consultas.js", "ip.js", "dominio.js")
+no_codigo("Preparar consultas", [1280, 300], "preparar-consultas.js", "ip.js", "url.js", "dominio.js")
 ALVO = "$('Preparar consultas').first().json"
 
 
@@ -246,7 +252,7 @@ consulta("urlscan (última análise)", [2160, 420],
          f"{ALVO}.urlFinal) ?? $('urlscan (busca)').first().json.body.results[0])._id }}}}/", CRED_URLSCAN)
 
 CONSULTAS = [
-    "VirusTotal (URL)", "VirusTotal (domínio)", "URLhaus", "ThreatFox", "OTX", "AbuseIPDB",
+    "VirusTotal (URL)", "VirusTotal (domínio)", "URLhaus", "URLhaus (URL)", "ThreatFox", "OTX", "AbuseIPDB",
     "Shodan InternetDB", "RDAP (registro do domínio)", "DNS (SPF)", "DNS (DMARC)",
 ]
 x = {nome: 2380 + 220 * i for i, nome in enumerate(CONSULTAS)}
@@ -257,6 +263,11 @@ consulta("VirusTotal (domínio)", [x["VirusTotal (domínio)"], 300],
 consulta("URLhaus", [x["URLhaus"], 300], "https://urlhaus-api.abuse.ch/v1/host/", CRED_ABUSECH, "POST", {
     "sendBody": True, "contentType": "form-urlencoded",
     "bodyParameters": {"parameters": [{"name": "host", "value": f"={{{{ {ALVO}.host }}}}"}]},
+})
+# URL exata: em hosts grandes a lista do host vem cortada e a URL analisada pode não estar nela.
+consulta("URLhaus (URL)", [x["URLhaus (URL)"], 300], "https://urlhaus-api.abuse.ch/v1/url/", CRED_ABUSECH, "POST", {
+    "sendBody": True, "contentType": "form-urlencoded",
+    "bodyParameters": {"parameters": [{"name": "url", "value": f"={{{{ {ALVO}.urlFinal }}}}"}]},
 })
 consulta("ThreatFox", [x["ThreatFox"], 300], "https://threatfox-api.abuse.ch/api/v1/", CRED_ABUSECH, "POST", {
     "sendBody": True, "specifyBody": "json",
@@ -497,8 +508,19 @@ def liga(origem, destinos, saida=0, tipo="main"):
     return origem, saida, tipo, destinos
 
 
+consulta("URLhaus (registro)", [-1140, 820], "https://urlhaus-api.abuse.ch/v1/urlid/", CRED_ABUSECH, "POST", {
+    "sendBody": True, "contentType": "form-urlencoded",
+    "bodyParameters": {"parameters": [{"name": "urlid", "value": "={{ $json.registroUrlhaus }}"}]},
+})
+no_codigo("Usar registro do URLhaus", [-920, 820], "usar-registro.js", "dominio.js")
+
 ligacoes = [
-    liga("Formulário", ["Configuração"]),
+    liga("Formulário", ["Registro de base de ameaças?"]),
+    liga("Registro de base de ameaças?", ["É registro do URLhaus?"]),
+    liga("É registro do URLhaus?", ["URLhaus (registro)"], 0),
+    liga("É registro do URLhaus?", ["Configuração"], 1),
+    liga("URLhaus (registro)", ["Usar registro do URLhaus"]),
+    liga("Usar registro do URLhaus", ["Configuração"]),
     liga("Configuração", ["Validar URL"]),
     liga("Validar URL", ["URL permitida?"]),
     liga("URL permitida?", ["DNS (IPv4)"], 0),
