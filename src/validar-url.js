@@ -1,5 +1,5 @@
 // Nó "Validar URL": confere o endereço ANTES de qualquer acesso.
-// Aceita só http/https nas portas padrão e recusa nomes e IPs internos (proteção contra SSRF).
+// Aceita só http/https (em qualquer porta) e recusa nomes e IPs internos (proteção contra SSRF).
 // Roda de novo a cada redirecionamento, porque um site público pode redirecionar para um endereço interno.
 const entrada = $input.first().json;
 const bruto = String(entrada.url ?? '').trim();
@@ -23,6 +23,13 @@ try {
   return falha(erro.message);
 }
 
+// Página de um registro em base de ameaças (URLhaus, VirusTotal, urlscan...): analisar o site da
+// plataforma daria "limpo". Registros do URLhaus já foram trocados pela URL listada antes daqui.
+const registro = paginaDeRegistro(url.href);
+if (registro) {
+  return falha(`Este endereço é a página de um registro no ${registro.plataforma}, não o site suspeito. Copie a URL ou o indicador mostrado nessa página e cole aqui.`);
+}
+
 if (url.ehIP) {
   if (ipBloqueado(url.host)) {
     return falha(`O endereço ${url.host} é interno ou reservado. Por segurança, o scanner só analisa sites públicos.`);
@@ -40,6 +47,7 @@ return [{
     url: url.href,
     host: url.host,
     ehIP: url.ehIP,
+    porta: url.porta,
     urlOriginal,
     saltos,
     cadeia,

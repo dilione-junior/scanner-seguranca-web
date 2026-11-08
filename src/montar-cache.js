@@ -1,10 +1,10 @@
 // Nó "Montar cache": guarda no Redis as respostas das fontes de reputação desta análise,
 // já enxutas (sem o que o relatório não usa), para a próxima análise da mesma URL não gastar cota.
 // Fica 24 h (configurável); se alguma fonte falhou, só 1 h, para tentar de novo logo.
-const VERSAO = 2; // 2: inclui o link relacionado (encurtadores)
+const VERSAO = 3; // 2: link relacionado (encurtadores); 3: URLhaus pela URL exata
 const FONTES = [
   'urlscan (busca)', 'urlscan (enviar análise)', 'urlscan (resultado)', 'urlscan (última análise)',
-  'VirusTotal (URL)', 'VirusTotal (domínio)', 'URLhaus', 'ThreatFox', 'OTX', 'AbuseIPDB',
+  'VirusTotal (URL)', 'VirusTotal (domínio)', 'URLhaus', 'URLhaus (URL)', 'ThreatFox', 'OTX', 'AbuseIPDB',
   'Shodan InternetDB', 'RDAP (registro do domínio)', 'DNS (SPF)', 'DNS (DMARC)',
   'VirusTotal (link relacionado)', 'URLhaus (link relacionado)',
 ];

@@ -125,13 +125,26 @@ let popular = false;
   }
 }
 
-// ---------------- URLhaus (abuse.ch): host distribuindo malware ----------------
+// ---------------- URLhaus (abuse.ch): URL exata e host distribuindo malware ----------------
+// A consulta pela URL exata é a que vale: em hosts grandes (raw.githubusercontent.com, drive...)
+// a lista "do host" vem cortada e a URL analisada pode não aparecer nela.
+let urlhausExata = null;
+{
+  const r = resposta('URLhaus (URL)');
+  const c = r.corpo;
+  if (r.ok && c?.query_status === 'ok' && c.url) {
+    urlhausExata = { status: textoCurto(c.url_status, 20), ameaca: textoCurto(c.threat, 40), tags: (c.tags ?? []).map((t) => textoCurto(t, 30)).slice(0, 5), link: String(c.urlhaus_reference ?? '') };
+  }
+  if (r.ok && c && (c.query_status === 'ok' || c.query_status === 'no_results')) registra('URLhaus (URL)', true);
+  else if (r.executada) registra('URLhaus (URL)', false, erroDeFonte(r));
+}
 {
   const r = resposta('URLhaus');
   const c = r.corpo;
   if (r.ok && c && (c.query_status === 'ok' || c.query_status === 'no_results')) {
     const urls = Array.isArray(c.urls) ? c.urls : [];
-    const exata = urls.find((u) => [a.urlFinal, a.urlOriginal].map((x) => String(x).replace(/\/$/, '')).includes(String(u.url).replace(/\/$/, '')));
+    const daLista = urls.find((u) => [a.urlFinal, a.urlOriginal].map((x) => String(x).replace(/\/$/, '')).includes(String(u.url).replace(/\/$/, '')));
+    const exata = urlhausExata ?? (daLista ? { status: textoCurto(daLista.url_status, 20), ameaca: textoCurto(daLista.threat, 40) } : null);
     const dbl = String(c.blacklists?.spamhaus_dbl ?? 'not listed');
     fontes.urlhaus = {
       listado: c.query_status === 'ok',
@@ -139,8 +152,8 @@ let popular = false;
       online: urls.filter((u) => u.url_status === 'online').length,
       ameacas: [...new Set(urls.flatMap((u) => [u.threat, ...(u.tags ?? [])]).filter(Boolean).map((t) => textoCurto(t, 40)))].slice(0, 6),
       spamhausDbl: textoCurto(dbl, 40),
-      exata: exata ? { status: textoCurto(exata.url_status, 20), ameaca: textoCurto(exata.threat, 40) } : null,
-      link: c.urlhaus_reference ?? '',
+      exata,
+      link: exata?.link || (c.urlhaus_reference ?? ''),
     };
     registra('URLhaus', true);
     const u = fontes.urlhaus;
@@ -151,7 +164,27 @@ let popular = false;
       else if (u.online > 0) sinal('URLhaus', 'malicioso', 35, `${u.online} URL(s) deste host distribuem malware agora (${u.ameacas.join(', ')}).`);
       else sinal('URLhaus', 'suspeito', 10, `Este host já distribuiu malware (${u.totalUrls} URL(s), hoje fora do ar).`);
     }
-  } else if (r.executada) registra('URLhaus', false, erroDeFonte(r));
+  } else if (r.executada) {
+    registra('URLhaus', false, erroDeFonte(r));
+    // O host não respondeu, mas a URL exata sim: não perde a evidência.
+    if (urlhausExata) {
+      fontes.urlhaus = { listado: true, totalUrls: 0, online: 0, ameacas: [], spamhausDbl: '', exata: urlhausExata, link: urlhausExata.link };
+      sinal('URLhaus', urlhausExata.status === 'online' ? 'malicioso' : 'suspeito', urlhausExata.status === 'online' ? 50 : 25, `Esta URL está no URLhaus (${urlhausExata.ameaca}, ${urlhausExata.status}).`);
+    }
+  }
+}
+
+// ---------------- Porta fora do padrão ----------------
+// Sites legítimos quase sempre usam 80/443. IP + porta alta é o formato típico de botnets de
+// IoT (Mozi, Mirai) e de servidores de malware improvisados.
+{
+  let porta = '';
+  try { porta = String($('Preparar consultas').first().json.porta ?? ''); } catch (erro) { /* sem dado */ }
+  if (porta) {
+    fontes.porta = porta;
+    if (a.ehIP) sinal('URL', 'suspeito', 15, `Endereço direto por IP na porta ${porta}, fora do padrão (80/443): formato comum em distribuição de malware e botnets.`);
+    else sinal('URL', 'info', 5, `O site usa a porta ${porta}, fora do padrão (80/443).`);
+  }
 }
 
 // ---------------- ThreatFox (abuse.ch): IOC de malware/C2 ----------------

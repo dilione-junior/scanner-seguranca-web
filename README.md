@@ -31,7 +31,7 @@ O campo **Contexto** (opcional) recebe de onde veio o link, por exemplo: "e-mail
 | **Navegador real** | urlscan.io | Modo completo: análise **privada** com print, domínios e IPs contatados, marca imitada (phishing), veredito e certificado. Modo só reputação: veredito da análise anterior mais recente e histórico do host |
 | **Reputação da URL** | VirusTotal (URL exata) | Quantos motores marcam a URL como maliciosa e quais |
 | **Reputação do domínio** | VirusTotal (domínio ou IP) | Detecções, reputação da comunidade, categorias, ranking de popularidade, certificado |
-| **Distribuição de malware** | URLhaus (abuse.ch) | Se a URL ou o host distribuem malware agora, família (ex.: GuLoader), Spamhaus DBL |
+| **Distribuição de malware** | URLhaus (abuse.ch) | Se a URL **exata** está listada (consulta própria, não depende da lista do host) e se o host distribui malware agora, família (ex.: GuLoader), Spamhaus DBL |
 | **IOCs de malware/C2** | ThreatFox (abuse.ch) | Se o host é IOC conhecido (ex.: servidor de comando de botnet) |
 | **Relatórios de ameaça** | OTX AlienVault | Em quantos relatórios da comunidade o host aparece; lista de confiáveis |
 | **IP do servidor** | AbuseIPDB | Denúncias de abuso, provedor, tipo de uso (CDN, data center), Tor |
@@ -66,6 +66,17 @@ Um link encurtado (`bit.ly/abc`, `tinyurl.com/...`, `encurtador.com.br/...`) esc
 | **Só reputação** | o próprio link encurtado | o **destino que o VirusTotal já conhece** (última análise da URL) |
 
 No modo só reputação o encurtador **não é aberto**: abrir o link curto conta um clique que o autor do link pode ver. Se o VirusTotal não conhece o destino, o relatório avisa "destino desconhecido" e o veredito **nunca sai "limpo"** (fica "indeterminado", mesmo que a IA diga o contrário). O relatório, o texto para copiar e os IOCs mostram o encurtador e o destino, sempre desarmados.
+
+### Portas fora do padrão
+
+Endereços como `http://59.97.249.78:45634/i` (IP + porta alta, típico de botnets de IoT como Mozi e Mirai) são aceitos: qualquer porta de 1 a 65535. A proteção contra SSRF continua no **host**: nomes e IPs internos são recusados em qualquer porta. Porta fora do padrão vira sinal no parecer: com IP direto é **suspeito**; com domínio, só um aviso. O Mozilla Observatory não roda nesses casos (ele só testa 80/443).
+
+### Link da página de uma base de ameaças
+
+Colar `https://urlhaus.abuse.ch/url/4060974/` analisaria o **site do URLhaus**, que é legítimo, e o parecer sairia "limpo". Por isso:
+
+- **Registro do URLhaus** (`urlhaus.abuse.ch/url/<número>/`): o fluxo pergunta à API do URLhaus qual URL está no registro e analisa **essa URL**, sempre em modo só reputação (é malware conhecido: o scanner não baixa nem abre). O contexto do relatório registra a troca.
+- **Outras páginas de registro** (VirusTotal `/gui/...`, urlscan.io `/result/...`, ThreatFox `/ioc/...`, MalwareBazaar, OTX, AbuseIPDB, URLhaus `/host/...`): o formulário pede para colar a URL ou o indicador mostrado na página.
 
 ## Como o parecer é montado
 
@@ -112,7 +123,7 @@ A antiga IA de "configuração" (que comentava os cabeçalhos) foi incorporada: 
 Uma ferramenta que acessa qualquer URL digitada pode virar um ataque se não for protegida. Este fluxo nasceu de um modelo da comunidade n8n, e nele foram corrigidos estes pontos:
 
 - **SSRF (Server-Side Request Forgery).** Sem proteção, alguém poderia "analisar" `http://redis:6379`, `http://192.168.0.1` ou `http://169.254.169.254` (metadados de nuvem) e usar o n8n para alcançar a rede interna. O fluxo:
-  - aceita só `http`/`https` nas portas 80 e 443, sem usuário ou senha na URL;
+  - aceita só `http`/`https` (porta de 1 a 65535), sem usuário ou senha na URL;
   - recusa nomes internos (`localhost`, nomes sem ponto como `n8n`, `.local`, `.internal`...);
   - lê a URL de forma **estrita** e a remonta em formato canônico. Formas ambíguas, como IPv4 em octal, hexa ou decimal (`0177.0.0.1`, `2130706433`), barra invertida e `usuario@`, são recusadas;
   - resolve o domínio (IPv4 e IPv6) e **recusa se qualquer IP for privado, loopback, link-local ou reservado**, o que pega domínios como `127.0.0.1.nip.io`;
@@ -271,6 +282,8 @@ scanner-seguranca-web/
 │   ├── lib/html.js          escape de HTML e Markdown seguro
 │   ├── lib/dominio.js       domínio registrado, ID de URL do VirusTotal, IOCs desarmados
 │   ├── lib/encurtador.js    lista de encurtadores de link conhecidos
+│   ├── lib/referencia.js    páginas de registro de bases de ameaças (URLhaus, VirusTotal...)
+│   ├── registro-ameaca.js  usar-registro.js   troca o registro do URLhaus pela URL listada
 │   ├── validar-url.js  verificar-dns.js  tratar-resposta.js  sem-visita.js
 │   ├── preparar-consultas.js     consultas às fontes de inteligência
 │   ├── link-relacionado.js  outra ponta da cadeia (link original ou destino do encurtador)
