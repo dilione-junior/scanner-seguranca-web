@@ -339,7 +339,7 @@ const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#f1f5
 return [{
   json: {
     html,
-    assunto: `[${p.veredito.toUpperCase()}] ${a.host}: risco ${riscoFinal}/100${a.visitado ? ` (postura ${a.nota})` : ''}`,
+    assunto: `RESULTADO [ANALISE DE SITE WEB] ${a.host} - Parecer: risco ${riscoFinal}/100`,
     veredito: p.veredito,
     nota: p.nota,
     risco: riscoFinal,

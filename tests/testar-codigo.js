@@ -620,7 +620,7 @@ teste('Markdown da IA é formatado', () => {
   assert.ok(relatorio.html.includes('<h3'));
   assert.ok(relatorio.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 });
-teste('assunto do e-mail tem veredito, host e risco', () => assert.match(relatorio.assunto, /^\[SUSPEITO\] exemplo\.com\.br: risco \d+\/100/));
+teste('assunto do e-mail tem host e parecer (risco 0 a 100)', () => assert.match(relatorio.assunto, /^RESULTADO \[ANALISE DE SITE WEB\] exemplo\.com\.br - Parecer: risco \d+\/100$/));
 teste('risco mostrado é 100 menos a nota de segurança', () => assert.strictEqual(relatorio.risco, 100 - relatorio.nota));
 teste('texto para copiar tem as seções do parecer e alvo desarmado', () => {
   for (const sec of ['RESUMO DO PARECER', 'ALVO', 'DETECÇÕES NAS FONTES', 'IOCs (desarmados)', 'FONTES CONSULTADAS']) assert.ok(relatorio.textoChamado.includes(sec), sec);

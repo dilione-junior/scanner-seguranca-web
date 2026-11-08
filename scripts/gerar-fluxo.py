@@ -452,7 +452,7 @@ no("Enviar por Outlook", "n8n-nodes-base.microsoftOutlook", 2, [4580, 640], {
     "resource": "message",
     "operation": "send",
     "toRecipients": "={{ $('Configuração').first().json.emailDestino }}",
-    "subject": f"={{{{ ({EH_ALERTA}) ? 'ALERTA - ' : '' }}}}{{{{ $('Gerar relatório').first().json.assunto }}}}",
+    "subject": "={{ $('Gerar relatório').first().json.assunto }}",
     "bodyContent": "={{ $('Gerar relatório').first().json.html }}",
     "additionalFields": {"bodyContentType": "html"},
 }, credentials=CRED_OUTLOOK, onError="continueRegularOutput")

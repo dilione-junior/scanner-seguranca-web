@@ -208,7 +208,7 @@ O e-mail vai sempre para o endereço da variável `EMAIL_AVISOS_PARA`. Assim o f
 
 ### Alerta por e-mail
 
-Quando o veredito final é **malicioso**, o fluxo manda o relatório completo para `EMAIL_AVISOS_PARA` com o assunto começando por `ALERTA - `, por exemplo `ALERTA - [MALICIOSO] site.com: risco 100/100`. Assim um site malicioso não depende de alguém ler o relatório na tela. O alerta só avisa: o bloqueio continua sempre com aprovação humana.
+Quando o veredito final é **malicioso**, o fluxo manda o relatório completo para `EMAIL_AVISOS_PARA` com o assunto `RESULTADO [ANALISE DE SITE WEB] site.com - Parecer: risco 100/100`. Assim um site malicioso não depende de alguém ler o relatório na tela. O alerta só avisa: o bloqueio continua sempre com aprovação humana.
 
 - Para alertar também os **suspeitos**, mude `alertaVereditos` para `malicioso,suspeito` no nó **Configuração**.
 - Para receber **todo** relatório por e-mail (não só os alertas), mude `enviarEmail` para `true`.
@@ -231,7 +231,7 @@ Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputaçã
 5. **IOCs e parecer para copiar:** tabela de IOCs por tipo (URL, domínio, IP) e o parecer em texto puro com seções numeradas (resumo, alvo, detecções nas fontes, evidências, ações, MITRE, IOCs, fontes). Cola igual no Teams, no e-mail ou no chamado.
 6. **Postura de segurança (A+ a F)**, **análise do conteúdo**, redirecionamentos e cabeçalhos (só no modo completo).
 
-O assunto do e-mail já traz o veredito e o risco: `[MALICIOSO] site.com: risco 100/100` (no modo completo, também a postura).
+O assunto do e-mail traz o site e o parecer (risco de 0 a 100): `RESULTADO [ANALISE DE SITE WEB] site.com - Parecer: risco 100/100`.
 
 Outros ajustes no nó **Configuração**:
 
