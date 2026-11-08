@@ -428,6 +428,85 @@ teste('IA fora do formato: vale o parecer automático', () => {
 });
 teste('IA com erro de API: vale o parecer automático', () => assert.match(parecer(audLimpo, { error: 'API key not valid' }).parecer.resumo, /API key not valid/));
 
+// ---------------------------------------------------------------- Encurtadores (link relacionado)
+console.log('Encurtadores');
+const LIBS_REL = ['ip.js', 'url.js', 'dominio.js', 'encurtador.js'];
+const relacionar = (pag, vtUrl) => executar('link-relacionado.js', LIBS_REL, {}, { 'Preparar consultas': preparar(pagina(completo, pag.urlFinal, pag)), ...(vtUrl ? { 'VirusTotal (URL)': vtUrl } : {}) });
+const curtoSemVisita = { urlOriginal: 'https://bit.ly/abc', urlFinal: 'https://bit.ly/abc', host: 'bit.ly', visitado: false, cabecalhos: {} };
+teste('reconhece encurtadores conhecidos (e subdomínio)', () => {
+  const ehEnc = new Function(`${ler('lib/encurtador.js')}; return ehEncurtador;`)();
+  for (const h of ['bit.ly', 'www.bit.ly', 'TINYURL.com', 't.co', 'encurtador.com.br']) assert.ok(ehEnc(h), h);
+  for (const h of ['exemplo.com.br', 'notbit.ly', 'bit.ly.exemplo.com']) assert.ok(!ehEnc(h), h);
+});
+teste('modo completo: link original do encurtador vira link relacionado', () => {
+  const r = relacionar({ urlOriginal: 'https://bit.ly/abc', urlFinal: 'https://exemplo.com.br/', cadeia: [{ url: 'https://bit.ly/abc', status: 301 }, { url: 'https://exemplo.com.br/', status: 200 }] });
+  assert.strictEqual(r.consultar, true);
+  assert.strictEqual(r.papel, 'origem');
+  assert.strictEqual(r.url, 'https://bit.ly/abc');
+  assert.strictEqual(r.encurtador, 'bit.ly');
+});
+teste('redirecionamento no mesmo domínio não gera consulta extra', () => {
+  const r = relacionar({ urlOriginal: 'https://www.exemplo.com.br/', urlFinal: 'https://exemplo.com.br/' });
+  assert.strictEqual(r.consultar, false);
+});
+teste('só reputação: destino vem do VirusTotal (sem abrir o encurtador)', () => {
+  const r = relacionar(curtoSemVisita, ok({ data: { attributes: { last_final_url: 'https://Phish.Exemplo.net/login?x=1' } } }));
+  assert.strictEqual(r.papel, 'destino');
+  assert.strictEqual(r.url, 'https://phish.exemplo.net/login?x=1');
+  assert.strictEqual(r.host, 'phish.exemplo.net');
+  assert.strictEqual(r.encurtador, 'bit.ly');
+  assert.strictEqual(r.destinoDesconhecido, false);
+});
+teste('só reputação: encurtador com destino desconhecido', () => {
+  const r = relacionar(curtoSemVisita, ok({ data: { attributes: {} } }));
+  assert.strictEqual(r.consultar, false);
+  assert.strictEqual(r.destinoDesconhecido, true);
+});
+teste('destino estranho do VirusTotal (javascript:) é ignorado', () => {
+  const r = relacionar(curtoSemVisita, ok({ data: { attributes: { last_final_url: 'javascript:alert(1)' } } }));
+  assert.strictEqual(r.consultar, false);
+});
+const relDestino = { consultar: true, papel: 'destino', url: 'https://phish.exemplo.net/login', host: 'phish.exemplo.net', vtUrlId: 'x', encurtador: 'bit.ly', destinoDesconhecido: false };
+teste('destino do encurtador malicioso no VirusTotal deixa o veredito malicioso', () => {
+  const r = consolidar({ 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': vtStats(6) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+  assert.strictEqual(r.fontes.linkRelacionado.vt.malicioso, 6);
+  assert.ok(r.consultadas.includes('VirusTotal (destino)'));
+});
+teste('destino do encurtador listado no URLhaus (online) é malicioso', () => {
+  const r = consolidar({ 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': ok({}, 404), 'URLhaus (link relacionado)': ok({ query_status: 'ok', url_status: 'online', threat: 'malware_download' }) }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'malicioso');
+  assert.strictEqual(r.fontes.linkRelacionado.vt.naoVista, true);
+});
+const relDesconhecido = { consultar: false, papel: '', url: '', host: '', vtUrlId: '', encurtador: 'bit.ly', destinoDesconhecido: true };
+teste('encurtador com destino desconhecido nunca sai "limpo"', () => {
+  const r = consolidar({ 'Link relacionado': relDesconhecido }).inteligencia;
+  assert.strictEqual(r.vereditoAutomatico, 'indeterminado');
+  assert.ok(r.sinais.some((s) => s.fonte === 'Encurtador'));
+});
+teste('IA não consegue chamar de "limpo" um encurtador com destino desconhecido', () => {
+  const r = parecer(consolidar({ 'Link relacionado': relDesconhecido }), respostaIA({ veredito: 'limpo', nota: 95, confianca: 'alta', resumo: 'ok' })).parecer;
+  assert.strictEqual(r.veredito, 'indeterminado');
+  assert.ok(r.nota <= 80);
+});
+teste('relatório mostra o destino desarmado no texto e nos IOCs', () => {
+  const aud = parecer(consolidar({ 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': vtStats(6) }), { error: 'sem IA' });
+  const r = executar('gerar-relatorio.js', ['html.js', 'dominio.js'], { auditoria: aud });
+  assert.ok(r.textoChamado.includes('Destino conhecido (VirusTotal): hxxps://phish[.]exemplo[.]net/login'));
+  assert.ok(r.textoChamado.includes('- URL: hxxps://phish[.]exemplo[.]net/login'));
+  assert.ok(r.textoChamado.includes('VirusTotal (destino)'));
+  assert.ok(!r.html.includes('https://phish.exemplo.net'));
+});
+teste('cache guarda as consultas e a decisão do link relacionado', () => {
+  const nosRel = { ...limpoBase, 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': vtStats(6) };
+  const prep = preparar(pagina(completo));
+  const aud = consolidar({ 'Link relacionado': relDestino, 'VirusTotal (link relacionado)': vtStats(6) });
+  const c = JSON.parse(executar('montar-cache.js', [], {}, { ...nosRel, 'Preparar consultas': prep, 'Configuração': { cacheHoras: 24 }, 'Consolidar inteligência': { auditoria: aud } }).valor);
+  assert.strictEqual(c.versao, 2);
+  assert.ok(c.respostas['VirusTotal (link relacionado)']);
+  assert.strictEqual(c.respostas['Link relacionado'].body.url, relDestino.url);
+});
+
 // ---------------------------------------------------------------- Gerar relatório (segurança do HTML)
 console.log('Gerar relatório');
 const malicioso = '<script>alert(1)</script><img src=x onerror=alert(2)>';

@@ -281,6 +281,19 @@ for nome, prefixo in (("DNS (SPF)", ""), ("DNS (DMARC)", "_dmarc.")):
         ]},
     })
 
+# Encurtadores e redirecionamentos para outro domínio: consulta também a OUTRA ponta da cadeia
+# (link original no modo completo; destino conhecido pelo VirusTotal no modo só reputação).
+# Só consultas: nem o encurtador nem o destino são acessados aqui. Gasta 1 consulta extra do VirusTotal.
+LINK_REL = "$('Link relacionado').first().json"
+no_codigo("Link relacionado", [4580, 300], "link-relacionado.js", "ip.js", "url.js", "dominio.js", "encurtador.js")
+no("Consultar link relacionado?", "n8n-nodes-base.if", 2.2, [4800, 300], condicao_if("={{ $json.consultar }}", VERDADEIRO))
+consulta("VirusTotal (link relacionado)", [5020, 200],
+         f"=https://www.virustotal.com/api/v3/urls/{{{{ {LINK_REL}.vtUrlId }}}}", CRED_VIRUSTOTAL)
+consulta("URLhaus (link relacionado)", [5240, 200], "https://urlhaus-api.abuse.ch/v1/url/", CRED_ABUSECH, "POST", {
+    "sendBody": True, "contentType": "form-urlencoded",
+    "bodyParameters": {"parameters": [{"name": "url", "value": f"={{{{ {LINK_REL}.url }}}}"}]},
+})
+
 no("Consultar Observatory?", "n8n-nodes-base.if", 2.2, [1280, 760], condicao_if(f"={{{{ {ALVO}.observatorio }}}}", VERDADEIRO))
 consulta("Mozilla Observatory", [1500, 640],
          f"=https://observatory-api.mdn.mozilla.net/api/v2/scan?host={{{{ encodeURIComponent({ALVO}.host) }}}}",
@@ -518,7 +531,12 @@ ligacoes = [
     liga("Tem análise anterior?", [CONSULTAS[0]], 1),
     liga("urlscan (última análise)", [CONSULTAS[0]]),
     *[liga(origem, [destino]) for origem, destino in zip(CONSULTAS, CONSULTAS[1:])],
-    liga(CONSULTAS[-1], ["Consultar Observatory?"]),
+    liga(CONSULTAS[-1], ["Link relacionado"]),
+    liga("Link relacionado", ["Consultar link relacionado?"]),
+    liga("Consultar link relacionado?", ["VirusTotal (link relacionado)"], 0),
+    liga("Consultar link relacionado?", ["Consultar Observatory?"], 1),
+    liga("VirusTotal (link relacionado)", ["URLhaus (link relacionado)"]),
+    liga("URLhaus (link relacionado)", ["Consultar Observatory?"]),
     liga("Consultar Observatory?", ["Mozilla Observatory"], 0),
     liga("Consultar Observatory?", ["Aguardar urlscan?"], 1),
     liga("Mozilla Observatory", ["Aguardar urlscan?"]),

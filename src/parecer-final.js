@@ -56,6 +56,11 @@ if (ia && typeof ia === 'object') {
     erroIA = 'a IA não informou veredito e nota válidos';
   }
 }
+if (veredito === 'limpo' && intel.fontes?.linkRelacionado?.destinoDesconhecido) {
+  avisos.push('Link encurtado com destino desconhecido: só o encurtador foi avaliado. Mantido "indeterminado".');
+  veredito = 'indeterminado';
+  nota = Math.min(nota, TETO.indeterminado);
+}
 if (origem === 'automatica') nota = Math.min(nota, TETO[veredito]);
 
 const CONFIANCA = ['alta', 'media', 'baixa'];
