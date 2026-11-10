@@ -515,7 +515,12 @@ return [{
         fontesReputacao,
         vereditoAutomatico: veredito,
         notaAutomatica: nota,
-        cache: { usado: Boolean(cache.hit), em: cache.hit ? cache.em : '' },
+        cache: {
+          usado: Boolean(cache.hit),
+          em: cache.hit ? cache.em : '',
+          reanalise: Boolean(cache.reanalise),
+          guardadoEm: cache.reanalise ? String(cache.guardadoEm ?? '') : '',
+        },
       },
     },
   },

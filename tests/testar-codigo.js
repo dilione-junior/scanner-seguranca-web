@@ -584,6 +584,58 @@ teste('cache guarda as consultas e a decisão do link relacionado', () => {
   assert.strictEqual(c.respostas['Link relacionado'].body.url, relDestino.url);
 });
 
+// ---------------------------------------------------------------- Reanalisar site
+console.log('Reanalisar site');
+const usarCom = (cache, reanalisar) => executar('usar-cache.js', [], { cache }, { 'Preparar consultas': prepCache, 'Configuração': { reanalisar } });
+const relatorioCom = (lido) => {
+  const prep = preparar(pagina(completo));
+  const aud = executar('processar-resultados.js', [], {}, { 'Preparar consultas': prep });
+  const nos = lido.hit ? {} : limpoBase;
+  const consolidado = executar('consolidar-inteligencia.js', ['dominio.js'], aud, { ...nos, 'Preparar consultas': prep, 'Usar cache': lido }).auditoria;
+  return { intel: consolidado.inteligencia, html: executar('gerar-relatorio.js', ['html.js', 'dominio.js'], { auditoria: parecer(consolidado, { error: 'sem IA' }) }).html };
+};
+teste('reanalisar ignora o cache válido (as fontes são consultadas de novo)', () => {
+  const guardado = montar(limpoBase).valor;
+  const r = usarCom(guardado, true);
+  assert.strictEqual(r.hit, false);
+  assert.deepStrictEqual(r.respostas, {});
+  assert.strictEqual(r.em, '');
+  assert.strictEqual(r.reanalise, true);
+  assert.ok(r.guardadoEm, 'guarda a data do resultado substituído');
+});
+teste('sem pedir reanálise, o cache válido continua valendo', () => {
+  const guardado = montar(limpoBase).valor;
+  for (const valor of [false, undefined, 'true', 1]) {
+    const r = usarCom(guardado, valor);
+    assert.strictEqual(r.hit, true, `reanalisar = ${String(valor)}`);
+    assert.strictEqual(r.reanalise, false);
+    assert.strictEqual(r.guardadoEm, '');
+  }
+});
+teste('reanalisar sem nada guardado: consulta normal, sem data anterior', () => {
+  const r = usarCom(null, true);
+  assert.strictEqual(r.hit, false);
+  assert.strictEqual(r.reanalise, true);
+  assert.strictEqual(r.guardadoEm, '');
+});
+teste('relatório avisa da reanálise e do cache (com a dica de reanalisar)', () => {
+  const guardado = montar(limpoBase).valor;
+  const reanalise = relatorioCom(usarCom(guardado, true));
+  assert.strictEqual(reanalise.intel.cache.usado, false);
+  assert.strictEqual(reanalise.intel.cache.reanalise, true);
+  assert.match(reanalise.html, /Reanálise pedida/);
+  assert.match(reanalise.html, /foi substituído/);
+  assert.ok(!reanalise.html.includes('Reputação vinda do cache'));
+  const doCache = relatorioCom(usarCom(guardado, false));
+  assert.strictEqual(doCache.intel.cache.usado, true);
+  assert.match(doCache.html, /Reputação vinda do cache/);
+  assert.match(doCache.html, /Reanalisar site/);
+  assert.ok(!doCache.html.includes('Reanálise pedida'));
+  const semGuardado = relatorioCom(usarCom(null, true));
+  assert.match(semGuardado.html, /Reanálise pedida/);
+  assert.ok(!semGuardado.html.includes('foi substituído'));
+});
+
 // ---------------------------------------------------------------- Gerar relatório (segurança do HTML)
 console.log('Gerar relatório');
 const malicioso = '<script>alert(1)</script><img src=x onerror=alert(2)>';

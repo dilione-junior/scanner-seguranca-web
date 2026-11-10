@@ -294,7 +294,16 @@ const observacoes = [];
 if (a.conteudoTruncado) observacoes.push(`A página tem ${a.tamanhoConteudo.toLocaleString('pt-BR')} caracteres; a IA analisou só o começo.`);
 if (a.visitado && a.status >= 400) observacoes.push(`O site respondeu com erro ${a.status}. A análise vale para a página de erro, não para o conteúdo normal.`);
 if (a.avisoDns) observacoes.push(a.avisoDns);
-if (intel.cache?.usado) observacoes.push(`Reputação vinda do cache: as fontes foram consultadas em ${new Date(intel.cache.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} (nenhuma cota gasta agora).`);
+const dataHora = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+};
+if (intel.cache?.usado) {
+  observacoes.push(`Reputação vinda do cache: as fontes foram consultadas em ${dataHora(intel.cache.em)} (nenhuma cota gasta agora). Para consultar de novo, escolha "Sim" em "Reanalisar site" no formulário.`);
+} else if (intel.cache?.reanalise) {
+  const anterior = dataHora(intel.cache.guardadoEm);
+  observacoes.push(`Reanálise pedida: as fontes de reputação foram consultadas de novo agora${anterior ? ` (o resultado guardado em ${anterior} foi substituído)` : ''}.`);
+}
 
 // Links do alvo saem DESARMADOS (hxxp, [.]): ninguém abre um site malicioso clicando no relatório.
 const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#f1f5f9;padding:16px;color:#0f172a">
