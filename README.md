@@ -24,6 +24,8 @@ Se o modo vier com um valor inesperado, o fluxo assume **só reputação**: na d
 
 O campo **Contexto** (opcional) recebe de onde veio o link, por exemplo: "e-mail para o financeiro pedindo atualização de cadastro". A IA usa esse texto para pesar o caso, como dado não verificado.
 
+O campo **Reanalisar site** (opcional) serve para quando você quer um resultado novo de um site já analisado. Em branco ou em **Não**, o scanner reaproveita a reputação guardada das últimas 24 h, se houver. Em **Sim**, ele ignora o que está guardado, consulta todas as fontes de novo e guarda o resultado novo no lugar do antigo.
+
 ## O que é verificado
 
 | Área | Fonte | O que mostra |
@@ -44,7 +46,7 @@ O campo **Contexto** (opcional) recebe de onde veio o link, por exemplo: "e-mail
 
 As fontes são **só consultadas**: nenhuma URL é enviada para análise pública.
 
-**Cache (opcional, Redis):** as respostas das fontes ficam guardadas por 24 h, separadas por URL e por modo, e por só 1 h se alguma fonte falhou. Repetir a análise da mesma URL não gasta cota (nem a análise privada do urlscan) e sai mais rápido. A leitura da página e a postura são sempre refeitas. O relatório avisa quando a reputação veio do cache e de quando ela é. Sem Redis, o fluxo funciona igual, só sem cache. Se uma fonte falhar, ou estiver sem chave ou sem cota, o relatório sai com as outras e mostra quais não responderam.
+**Cache (opcional, Redis):** as respostas das fontes ficam guardadas por 24 h, separadas por URL e por modo, e por só 1 h se alguma fonte falhou. Repetir a análise da mesma URL não gasta cota (nem a análise privada do urlscan) e sai mais rápido. A leitura da página e a postura são sempre refeitas. O relatório avisa quando a reputação veio do cache e de quando ela é. Para não usar o cache numa análise, escolha **Sim** em **Reanalisar site**: as fontes são consultadas de novo, o que gasta cota (no modo completo, também uma análise privada do urlscan). Sem Redis, o fluxo funciona igual, só sem cache. Se uma fonte falhar, ou estiver sem chave ou sem cota, o relatório sai com as outras e mostra quais não responderam.
 
 ### Cuidado com falso positivo
 
@@ -222,7 +224,7 @@ Abra o formulário (com n8n local):
 http://127.0.0.1:5678/form/scanner-seguranca-web
 ```
 
-Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputação**), descreva opcionalmente o **contexto** e clique em **Analisar site**. Em 20 a 60 segundos (até 2 minutos no modo completo, por causa do urlscan) o relatório aparece na tela, nesta ordem:
+Digite o endereço, escolha o **modo** (para link suspeito, use **Só reputação**), descreva opcionalmente o **contexto**, escolha **Sim** em **Reanalisar site** se quiser ignorar o resultado guardado, e clique em **Analisar site**. Em 20 a 60 segundos (até 2 minutos no modo completo, por causa do urlscan) o relatório aparece na tela, nesta ordem:
 
 1. **Parecer do analista SOC:** veredito, risco de 0 a 100, quantas fontes deram alerta, gravidade, confiança, resumo, evidências, possíveis falsos positivos, ações recomendadas, correções e MITRE ATT&CK.
 2. **Reputação e inteligência:** o que cada fonte disse, com link para abrir no site da fonte (no urlscan, também o print da página; a análise privada abre logado na sua conta).
@@ -268,7 +270,7 @@ Uma CSP com `'unsafe-inline'` (sem nonce ou hash) desce a nota um degrau. **Sem 
 O código de cada nó *Code* fica em [src/](src/), em arquivos `.js` legíveis, e as bibliotecas comuns ficam em [src/lib/](src/lib/). O JSON do fluxo é **gerado** a partir deles:
 
 ```bash
-node tests/testar-codigo.js      # 132 testes: SSRF, DNS, modo só reputação, urlscan, cache, falsos positivos, travas da IA, escape do HTML
+node tests/testar-codigo.js      # 174 testes: SSRF, DNS, modo só reputação, urlscan, cache, reanálise, falsos positivos, links encurtados, portas fora do padrão, registro do URLhaus, travas da IA, escape do HTML
 python scripts/gerar-fluxo.py    # gera workflow/scanner-seguranca-web.json
 ```
 
@@ -301,7 +303,7 @@ scanner-seguranca-web/
 
 ## Roteiro (próximas melhorias)
 
-Ideias já feitas: **urlscan.io**, **cache no Redis**, **alerta por e-mail** para veredito malicioso (no lugar de chamado no GLPI e aviso no Telegram) e **links encurtados** (consulta da outra ponta da cadeia).
+Ideias já feitas: **urlscan.io**, **cache no Redis**, **alerta por e-mail** para veredito malicioso (no lugar de chamado no GLPI e aviso no Telegram), **links encurtados** (consulta da outra ponta da cadeia), **portas fora do padrão**, **link de registro do URLhaus** (analisa a URL listada no registro) e **reanálise** pelo formulário (ignora o cache).
 
 Outras ideias: cadastrar os IOCs maliciosos numa lista do Wazuh (CDB), para alertar se alguém da rede acessar.
 

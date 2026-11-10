@@ -126,6 +126,15 @@ no("Formulário", "n8n-nodes-base.formTrigger", 2.2, [-1360, 400], {
             "fieldType": "textarea",
             "placeholder": "Ex.: link recebido por e-mail pelo financeiro, pedindo atualização de cadastro",
         },
+        {
+            # Opcional: em branco vale "Não". "Sim" ignora o cache e consulta as fontes de novo.
+            "fieldLabel": "Reanalisar site",
+            "fieldType": "dropdown",
+            "fieldOptions": {"values": [
+                {"option": "Não (utilizar resultados armazenados em análises anteriores, se houver)"},
+                {"option": "Sim (consultar as fontes de novo agora)"},
+            ]},
+        },
     ]},
     "options": {"path": "scanner-seguranca-web", "buttonLabel": "Analisar site", "appendAttribution": False},
 }, webhookId="5d0f6c1e-8a2b-4c3d-9e4f-5a6b7c8d9e01")
@@ -142,6 +151,8 @@ no("Configuração", "n8n-nodes-base.set", 3.4, [-1140, 400], {
         # Na dúvida, NÃO acessa o site: só o valor "Completa..." libera a leitura da página.
         {"id": id_no("cfg-modo"), "name": "modo", "value": "={{ String($json['Modo da análise'] ?? '').startsWith('Completa') ? 'completa' : 'reputacao' }}", "type": "string"},
         {"id": id_no("cfg-contexto"), "name": "contexto", "value": "={{ String($json['Contexto (opcional)'] ?? '').slice(0, 500) }}", "type": "string"},
+        # Reanálise: só o valor "Sim..." ignora o cache (as fontes são consultadas de novo e o cache é regravado).
+        {"id": id_no("cfg-reanalisar"), "name": "reanalisar", "value": "={{ String($json['Reanalisar site'] ?? '').startsWith('Sim') }}", "type": "boolean"},
         {"id": id_no("cfg-saltos"), "name": "saltos", "value": 0, "type": "number"},
         # Relatório de TODA análise por e-mail (desligado). O alerta abaixo vale mesmo com ele desligado.
         {"id": id_no("cfg-email"), "name": "enviarEmail", "value": False, "type": "boolean"},
@@ -493,7 +504,7 @@ O n8n roda numa rede com outros serviços. Sem proteção, alguém poderia pedir
 
 nota("Nota - Inteligência", [1460, -100], 1100, 280, 5, """## Inteligência de ameaças (só consultas, nada é enviado para análise pública)
 **urlscan.io** (histórico do host; no modo completo, análise PRIVADA num navegador real), **VirusTotal** (URL exata e domínio), **URLhaus** e **ThreatFox** (abuse.ch), **OTX**, **AbuseIPDB** e **Shodan InternetDB** (IP), **RDAP** (idade do domínio), **SPF/DMARC** (dns.google).
-Cota grátis do VirusTotal: 4 consultas/min e 500/dia; cada análise usa 2. **Cache no Redis** (24 h por URL e modo, 1 h se uma fonte falhou): repetir a mesma URL não gasta cota.
+Cota grátis do VirusTotal: 4 consultas/min e 500/dia; cada análise usa 2. **Cache no Redis** (24 h por URL e modo, 1 h se uma fonte falhou): repetir a mesma URL não gasta cota. **Reanalisar site = Sim** no formulário ignora o cache e consulta tudo de novo.
 
 **Consolidar inteligência** calcula sinais, um veredito e uma nota automáticos. Só casamento EXATO da URL/host pesa forte: plataformas populares (github.com, drive.google.com) hospedam arquivos de terceiros e aparecem nas listas.""")
 
